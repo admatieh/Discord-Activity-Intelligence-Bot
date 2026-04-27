@@ -89,6 +89,7 @@ Instructors running daily Discord sessions waste hours on repetitive tasks:
 ```bash
 git clone https://github.com/admatieh/Discord-Activity-Intelligence-Bot
 cd Discord-Activity-Intelligence-Bot
+```
 
 ### 2. Install Dependencies
 ```bash
