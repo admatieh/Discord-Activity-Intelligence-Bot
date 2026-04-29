@@ -1,5 +1,13 @@
-const sessionManager = require('../services/sessionManager');
+// events/messageCreate.js
+//
+// Event routing ONLY — parses commands and dispatches.
+// No attendance tracking here (attendance is voice-based only).
+// ---------------------------------------------------------------------------
+
 const commands = require('../commands');
+const logger = require('../utils/logger');
+
+const PREFIX = '!';
 
 module.exports = {
     name: 'messageCreate',
@@ -7,21 +15,22 @@ module.exports = {
         if (message.author.bot) return;
 
         const content = message.content.trim();
-        const prefix = '!'; // could be moved to config later
+        if (!content.startsWith(PREFIX)) return;
 
-        // Check if it's a valid command with the prefix
-        if (content.startsWith(prefix)) {
-            const commandName = content.slice(prefix.length); // e.g., 'start-session'
+        const args = content.slice(PREFIX.length).split(/ +/);
+        const commandName = args.shift().toLowerCase();
+        const command = commands.get(commandName);
 
-            const command = commands.get(commandName);
-            if (command) {
-                // Execute the command handler
-                return command.execute(message);
-            }
-            // else: unknown command, optionally reply with help or ignore
+        if (!command) return;
+
+        try {
+            command.execute(message, args);
+        } catch (error) {
+            logger.error(`Command '${commandName}' threw an error: ${error.message}`, {
+                commandName,
+                error: error.message
+            });
+            message.reply('❌ An error occurred while executing that command.').catch(() => {});
         }
-
-        // If not a command, continue attendance tracking (text-based)
-        sessionManager.trackAttendance(message.author.id, message.channel.id);
-    },
+    }
 };

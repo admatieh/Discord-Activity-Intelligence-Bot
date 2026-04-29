@@ -1,0 +1,61 @@
+// commands/session-end.js
+const sessionManager = require('../services/sessionManager');
+const { checkInstructor } = require('../utils/permissions');
+
+module.exports = {
+    name: 'session-end',
+    execute(message, args) {
+        if (!message.guild) {
+            return message.reply('❌ Server only.');
+        }
+
+        const perm = checkInstructor(message.member);
+        if (!perm.allowed) return message.reply(perm.message);
+
+        // No args → alias for session-end-here
+        if (!args || args.length === 0) {
+            const voiceChannel = message.member.voice?.channel;
+            if (!voiceChannel) {
+                return message.reply('❌ You must be in a voice channel, or specify a target.');
+            }
+            const result = sessionManager.endSession(voiceChannel.id);
+            return message.reply(result.message);
+        }
+
+        const sub = args[0].toLowerCase();
+
+        // !session-end all
+        if (sub === 'all') {
+            const result = sessionManager.endAllSessions();
+            return message.reply(result.message);
+        }
+
+        // !session-end here
+        if (sub === 'here') {
+            const voiceChannel = message.member.voice?.channel;
+            if (!voiceChannel) {
+                return message.reply('❌ You must be in a voice channel.');
+            }
+            const result = sessionManager.endSession(voiceChannel.id);
+            return message.reply(result.message);
+        }
+
+        // !session-end <sessionId> (number)
+        const sessionId = parseInt(sub, 10);
+        if (!isNaN(sessionId)) {
+            const result = sessionManager.endSessionById(sessionId, 'Manual end');
+            return message.reply(result.message);
+        }
+
+        // !session-end <channel name> — find channel by name
+        const channelName = args.join(' ').toLowerCase();
+        const voiceChannel = message.guild.channels.cache.find(
+            c => c.name.toLowerCase() === channelName && c.isVoiceBased()
+        );
+        if (!voiceChannel) {
+            return message.reply(`❌ Voice channel "${channelName}" not found.`);
+        }
+        const result = sessionManager.endSession(voiceChannel.id);
+        return message.reply(result.message);
+    }
+};
