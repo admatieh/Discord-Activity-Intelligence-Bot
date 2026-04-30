@@ -1,5 +1,5 @@
 // commands/session-start.js
-const sessionManager = require('../services/sessionManager');
+const sessionService = require('../modules/sessions/sessionService');
 const { DEFAULT_SESSION_DURATION } = require('../config/constants');
 const { checkInstructor } = require('../utils/permissions');
 
@@ -24,7 +24,7 @@ module.exports = {
             if (!isNaN(parsed) && parsed > 0) duration = parsed;
         }
 
-        const result = sessionManager.startSession(voiceChannel.id, message.author.tag, {
+        const result = sessionService.startSession(voiceChannel.id, message.author.tag, {
             durationMinutes: duration
         });
         return message.reply(result.message);

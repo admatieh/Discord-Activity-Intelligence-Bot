@@ -82,6 +82,22 @@ function initializeSchema() {
             created_at TEXT,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS activity_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            channel_id TEXT,
+            session_id INTEGER,
+            metadata TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_activity_events_type
+            ON activity_events (type);
+
+        CREATE INDEX IF NOT EXISTS idx_activity_events_user
+            ON activity_events (user_id);
     `);
 
     // Ensure columns exist for older databases that may lack them

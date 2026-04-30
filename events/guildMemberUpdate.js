@@ -1,9 +1,9 @@
 // events/guildMemberUpdate.js
-const userSync = require('../services/userSync');
+const userService = require('../modules/users/userService');
 
 module.exports = {
     name: 'guildMemberUpdate',
     execute(oldMember, newMember) {
-        userSync.syncMember(newMember);
+        userService.syncMember(newMember);
     }
 };

@@ -1,6 +1,7 @@
 // events/ready.js
-const sessionManager = require('../services/sessionManager');
-const userSync = require('../services/userSync');
+const sessionService = require('../modules/sessions/sessionService');
+const userService = require('../modules/users/userService');
+const modules = require('../modules');
 const logger = require('../utils/logger');
 
 module.exports = {
@@ -9,12 +10,15 @@ module.exports = {
     async execute(client) {
         logger.log(`Logged in as ${client.user.tag}`);
 
+        // Register all event bus listeners
+        modules.registerAll();
+
         // Initialize sessions: close stale ones and restart timers
-        sessionManager.initSessions();
+        sessionService.initSessions();
 
         // Sync all guild members into users table
         for (const [, guild] of client.guilds.cache) {
-            await userSync.syncAllMembers(guild);
+            await userService.syncAllMembers(guild);
         }
     }
 };

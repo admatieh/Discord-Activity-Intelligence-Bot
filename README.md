@@ -14,6 +14,63 @@ This bot is a **solo graduation + internship project** designed to help instruct
 
 ---
 
+## 🏗️ Architecture Overview
+
+The bot uses an **event-driven, modular architecture** built around a central event bus.
+
+### Event Bus
+
+All domain events flow through `core/eventBus.js` (Node.js EventEmitter). Modules subscribe to events — no direct coupling between producers and consumers.
+
+**Events:**
+| Event | Emitted By | Consumed By |
+|-------|-----------|-------------|
+| `VOICE_JOIN` | voiceHandler | attendanceService, activityLogger |
+| `VOICE_LEAVE` | voiceHandler | attendanceService, activityLogger |
+| `SESSION_STARTED` | sessionService | (future listeners) |
+| `SESSION_ENDED` | sessionService | (future listeners) |
+
+### Event Flow
+
+```
+Discord voiceStateUpdate → voiceHandler → eventBus.emit() → listeners
+```
+
+### Modules by Domain
+
+```
+modules/
+  sessions/        → Session lifecycle (start, end, switch, timers)
+  attendance/      → Voice attendance tracking (join/leave per session)
+  voice/           → Discord voice event → event bus adapter
+  users/           → Guild member sync to DB
+  activity/        → Generic activity event logging
+```
+
+### Standard Event Payload
+
+All events use a consistent payload format:
+
+```json
+{
+  "userId": "string",
+  "channelId": "string",
+  "sessionId": "number|null",
+  "timestamp": "ISO string"
+}
+```
+
+---
+
+## 🔑 Key Concepts
+
+- **Session** — Voice channel scoped. One active session per channel. Auto-ends via timer or empty-channel grace.
+- **Attendance** — First join per user per session. Recorded as attendee on `VOICE_JOIN`.
+- **Voice Events** — Join/leave intervals tracked per user per session for duration analysis.
+- **Activity Events** — Generic event storage (`activity_events` table) for future extensibility.
+
+---
+
 ## 🎯 What Problem Does It Solve?
 
 Instructors running daily Discord sessions waste hours on repetitive tasks:
@@ -26,24 +83,16 @@ Instructors running daily Discord sessions waste hours on repetitive tasks:
 
 ---
 
-## 🔑 Key Concepts
-
-- **Attendance Tracking** – Based on voice channel presence (join/leave times) with configurable grace periods. Classifies users as *present*, *late*, *absent* or *left early*.
-- **Participation Scoring** – Measures engagement via message count, replies, and bot command usage. Labels users as *active*, *passive*, or *non-participating*.
-- **Session Lifecycle** – One command to start, the bot tracks everything, and at the end produces a summary with attendance stats and engagement levels.
-- **Instructor-Friendly** – Role‑based access ensures only instructors can start/end sessions. Everything is logged and later viewable via a web dashboard (coming soon).
-
----
-
 ## ⚡ Features
 
 - 🎙️ **Voice‑channel attendance** — accurate, based on real join/leave events
-- 💬 **Message‑based engagement scoring** — configurable weights for messages, replies, commands
 - 🛡️ **Permission guard** — only instructors can control sessions
-- 🧾 **Session summaries** — total attendees, engagement breakdown, top contributors
-- 🧠 **In-memory state** (current MVP) — no database required for testing
-- ⚙️ **Modular architecture** — easy to extend with new commands or tracking methods
-- 📊 **Future dashboard** — built with Next.js for historical data visualization
+- ⏱️ **Auto-end timers** — sessions close after configured duration
+- 🏚️ **Empty channel detection** — auto-ends session when channel empties (with grace period)
+- 🔄 **Session switching** — move tracking to a different voice channel
+- 📊 **Session info** — view active/all sessions with attendee and event counts
+- 🧾 **Activity event log** — generic event storage for future analysis
+- ⚙️ **Event-driven architecture** — fully decoupled, scalable
 
 ---
 
@@ -52,29 +101,30 @@ Instructors running daily Discord sessions waste hours on repetitive tasks:
 | Layer          | Technology            |
 |----------------|-----------------------|
 | Bot            | Node.js + discord.js v14 |
+| Database       | SQLite (better-sqlite3) |
+| Event System   | Node.js EventEmitter |
 | Dashboard (future) | Next.js           |
-| Database (future)  | SQLite / PostgreSQL |
-| Real-time tracking | Discord Gateway Intents (Guilds, Messages, VoiceStates) |
 
 ---
 
-## 🚧 Current Status
+## 🚧 Scalability Design
 
-> ✅ **MVP Phase 1** – The bot is alive, responds to commands, and tracks text-based attendance in memory.
+Adding new features requires **zero core refactoring**:
 
-**What already works:**
-- `!start-session` / `!end-session` commands
-- In-memory session & attendance storage (unique user Set)
-- Basic validation (channel type, duplicate session)
-- Modular command & event loader
+```js
+// Example: modules/notifications/notificationService.js
+const { eventBus, Events } = require('../../core/eventBus');
 
-**What’s being added next:**
-- Voice channel attendance tracking (voiceStateUpdate event)
-- Participation scoring based on message activity
-- Persistent storage (SQLite)
-- Instructor role validation
-- Session summaries and data export
+function register() {
+    eventBus.on(Events.SESSION_STARTED, ({ sessionId, channelId }) => {
+        // send notification
+    });
+}
 
+module.exports = { register };
+```
+
+Then add one line to `modules/index.js` → done.
 
 ---
 
@@ -123,23 +173,36 @@ You should see `Logged in as <BotName>#0000` in the console.
 | Command | Action |
 |---------|--------|
 | `!ping` | Check if bot is responsive |
-| `!start-session` | Start tracking attendance in the current text channel |
-| `!end-session` | End the session and display total unique attendees |
+| `!session-start [minutes]` | Start tracking in your voice channel (default: 60 min) |
+| `!session-end [all\|here\|id\|name]` | End a session |
+| `!session-switch [here\|name]` | Move tracking to another voice channel |
+| `!session-info [all\|open\|id]` | View session details |
 | `!whoareyou` | Get details about the bot's purpose |
+| `!whoami` | Check your identity |
 | `!welcome` | Send a welcome message to the channel |
 
-> More commands (like `/summary`, `/report`) and voice tracking will be added in the next updates.
+---
+
+## 🛠️ Development Notes
+
+- **Listeners must register once** — all modules use `initialized` guard pattern
+- **Event payloads must stay consistent** — `{ userId, channelId, sessionId, timestamp }`
+- **Session cache** — in-memory `Map<channelId, sessionId>` avoids repeated DB lookups
+- **Error isolation** — each event listener is wrapped in try/catch so one failure doesn't affect others
+- **Startup order** — DB → Models → Services → Event listeners → Discord login
 
 ---
 
 ## 🗺️ Roadmap
 
-- [x] Bot setup with basic command handling
-- [x] In-memory session & text‑based attendance
-- [ ] Voice channel attendance tracking
+- [x] Bot setup with command handling
+- [x] Voice channel attendance tracking
+- [x] Persistent storage (SQLite)
+- [x] Role‑based permission checks
+- [x] Event-driven modular architecture
+- [x] Session auto-end timers
+- [x] Empty channel detection
 - [ ] Participation scoring & engagement classification
-- [ ] Persistent data storage (SQLite)
-- [ ] Role‑based permission checks
 - [ ] Session summaries & export (CSV)
 - [ ] Next.js dashboard for instructors
 - [ ] Scheduled sessions (API triggers)
@@ -163,4 +226,3 @@ This project is for educational purposes. License details to be added soon.
 
 - [discord.js](https://discord.js.org/) – powerful Node.js library
 - Project designed with ❤️ for real‑world internship experience
-

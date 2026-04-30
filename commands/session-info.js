@@ -1,5 +1,5 @@
 // commands/session-info.js
-const sessionManager = require('../services/sessionManager');
+const sessionService = require('../modules/sessions/sessionService');
 const sessionModel = require('../models/sessionModel');
 
 module.exports = {
@@ -39,7 +39,7 @@ module.exports = {
         // !session-info <sessionId> — detailed info
         const sessionId = parseInt(sub, 10);
         if (!isNaN(sessionId)) {
-            const info = sessionManager.getSessionInfo(sessionId);
+            const info = sessionService.getSessionInfo(sessionId);
             if (!info) {
                 return message.reply('❌ Session not found.');
             }
@@ -59,9 +59,9 @@ module.exports = {
 
         // No args — show active session for user's channel
         const voiceChannel = message.member.voice?.channel;
-        if (voiceChannel && sessionManager.isSessionActive(voiceChannel.id)) {
-            const sid = sessionManager.getSessionId(voiceChannel.id);
-            const info = sessionManager.getSessionInfo(sid);
+        if (voiceChannel && sessionService.isSessionActive(voiceChannel.id)) {
+            const sid = sessionService.getSessionId(voiceChannel.id);
+            const info = sessionService.getSessionInfo(sid);
             if (info) {
                 const lines = [
                     `**Session #${info.id}** 🟢 Active`,
