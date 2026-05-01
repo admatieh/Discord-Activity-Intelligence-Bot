@@ -6,6 +6,7 @@
 
 const commands = require('../commands');
 const logger = require('../utils/logger');
+const { parseArgs } = require('../utils/argParser');
 
 const PREFIX = '!';
 
@@ -17,14 +18,19 @@ module.exports = {
         const content = message.content.trim();
         if (!content.startsWith(PREFIX)) return;
 
-        const args = content.slice(PREFIX.length).split(/ +/);
-        const commandName = args.shift().toLowerCase();
+        // Parse the full message into { command, positional, options }
+        const parsed = parseArgs(message);
+        const commandName = parsed.command;
         const command = commands.get(commandName);
 
         if (!command) return;
 
         try {
-            command.execute(message, args);
+            // Pass parsed args + the commands map (for help system)
+            command.execute(message, parsed.positional, {
+                parsed,
+                commands
+            });
         } catch (error) {
             logger.error(`Command '${commandName}' threw an error: ${error.message}`, {
                 commandName,

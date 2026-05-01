@@ -1,0 +1,123 @@
+=====================================
+  Discord Activity Intelligence Bot
+  Command Reference
+=====================================
+
+PREFIX: !
+
+
+-------------------------------------
+1. ping
+-------------------------------------
+Description: Check if the bot is online and responsive.
+Usage:       !ping
+Options:     None
+
+
+-------------------------------------
+2. whoami
+-------------------------------------
+Description: Display your Discord identity.
+Usage:       !whoami
+Options:     None
+
+
+-------------------------------------
+3. whoareyou
+-------------------------------------
+Description: Learn what this bot does.
+Usage:       !whoareyou
+Options:     None
+
+
+-------------------------------------
+4. welcome
+-------------------------------------
+Description: Send a welcome message to the current channel.
+Usage:       !welcome
+Options:     None
+
+
+-------------------------------------
+5. session-start
+-------------------------------------
+Description: Start a voice tracking session in a channel.
+Usage:       !session-start --duration <minutes> --channel <#channel>
+Options:
+  --duration   number    (optional)  Session length in minutes (default: 60)
+  --channel    channel   (optional)  Target voice channel (default: your current voice channel)
+
+Examples:
+  !session-start
+  !session-start --duration 120
+  !session-start --channel #study-room
+  !session-start --duration 90 --channel #study-room
+
+
+-------------------------------------
+6. session-end
+-------------------------------------
+Description: End an active voice tracking session.
+Usage:       !session-end [--target all|here] [--id <sessionId>] [--channel <#channel>]
+Options:
+  --target     string    (optional)  "all" to end all sessions, "here" to end in your channel
+  --id         number    (optional)  Specific session ID to end
+  --channel    channel   (optional)  Target voice channel to end session in
+
+Examples:
+  !session-end
+  !session-end --target all
+  !session-end --id 42
+  !session-end --channel #study-room
+
+
+-------------------------------------
+7. session-info
+-------------------------------------
+Description: View details about sessions (all, active, or specific).
+Usage:       !session-info [--view all|open] [--id <sessionId>]
+Options:
+  --view       string    (optional)  "all" for all sessions, "open" for active sessions only
+  --id         number    (optional)  Specific session ID for detailed info
+
+Examples:
+  !session-info
+  !session-info --view all
+  !session-info --view open
+  !session-info --id 5
+
+
+-------------------------------------
+8. session-switch
+-------------------------------------
+Description: Move an active session to a different voice channel.
+Usage:       !session-switch --channel <#channel>
+Options:
+  --channel    channel   (optional)  Target voice channel to switch to (default: your current voice channel)
+
+Examples:
+  !session-switch
+  !session-switch --channel #lobby
+
+
+-------------------------------------
+9. help
+-------------------------------------
+Description: Show a list of all commands or details about a specific command.
+Usage:       !help [--command <name>]
+Options:
+  --command    string    (optional)  Command name to get detailed help for
+
+Examples:
+  !help
+  !help session-start
+  !help --command session-end
+
+
+=====================================
+  Notes
+=====================================
+- All arguments use the --key value syntax
+- Positional arguments (e.g. !session-start 60) are NOT supported
+- Channel arguments accept #channel mentions or channel names
+- The bot requires the "Instructor" role or Administrator permission for session commands

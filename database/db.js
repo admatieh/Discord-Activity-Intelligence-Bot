@@ -76,7 +76,6 @@ function initializeSchema() {
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
             username TEXT NOT NULL,
-            discriminator TEXT,
             display_name TEXT,
             joined_at TEXT,
             created_at TEXT,
@@ -98,6 +97,15 @@ function initializeSchema() {
 
         CREATE INDEX IF NOT EXISTS idx_activity_events_user
             ON activity_events (user_id);
+
+        CREATE INDEX idx_sessions_channel_active
+            ON sessions (channel_id, end_time);
+
+        CREATE INDEX idx_voice_events_session
+            ON voice_events (session_id);
+
+        CREATE INDEX idx_activity_events_session
+            ON activity_events (session_id);
     `);
 
     // Ensure columns exist for older databases that may lack them
