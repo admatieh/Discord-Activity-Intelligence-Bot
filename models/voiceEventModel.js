@@ -66,6 +66,24 @@ function getEventsBySession(sessionId) {
 }
 
 /**
+ * Get all voice event rows for a specific user in a session, ordered by join_time.
+ */
+function getEventsBySessionAndUser(sessionId, userId) {
+    try {
+        return db.prepare(
+            `SELECT *
+             FROM voice_events
+             WHERE session_id = ?
+               AND user_id = ?
+             ORDER BY join_time ASC`
+        ).all(sessionId, userId);
+    } catch (error) {
+        logger.error(`voiceEventModel.getEventsBySessionAndUser error: ${error.message}`);
+        return [];
+    }
+}
+
+/**
  * Get voice event count for a session.
  */
 function getEventCountBySession(sessionId) {
@@ -135,6 +153,7 @@ module.exports = {
     createJoinEvent,
     getOpenEvent,
     getEventsBySession,
+    getEventsBySessionAndUser,
     getEventCountBySession,
     closeOpenEvent,
     closeAllOpenEvents

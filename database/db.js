@@ -73,19 +73,12 @@ function initializeSchema() {
         CREATE INDEX IF NOT EXISTS idx_logs_created_at
             ON logs (created_at);
 
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            username TEXT NOT NULL,
-            display_name TEXT,
-            joined_at TEXT,
-            created_at TEXT,
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
+        CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, username TEXT NOT NULL, discriminator TEXT, display_name TEXT, joined_at TEXT, created_at TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')) );
 
         CREATE TABLE IF NOT EXISTS activity_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             type TEXT NOT NULL,
-            user_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,  
             channel_id TEXT,
             session_id INTEGER,
             metadata TEXT,
@@ -98,14 +91,32 @@ function initializeSchema() {
         CREATE INDEX IF NOT EXISTS idx_activity_events_user
             ON activity_events (user_id);
 
-        CREATE INDEX idx_sessions_channel_active
+        CREATE INDEX IF NOT EXISTS idx_sessions_channel_active
             ON sessions (channel_id, end_time);
 
-        CREATE INDEX idx_voice_events_session
+        CREATE INDEX IF NOT EXISTS idx_voice_events_session
             ON voice_events (session_id);
 
-        CREATE INDEX idx_activity_events_session
+        CREATE INDEX IF NOT EXISTS idx_activity_events_session
             ON activity_events (session_id);
+
+        CREATE TABLE IF NOT EXISTS attendance_summary (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            total_time_seconds INTEGER NOT NULL,
+            first_join_time TEXT,
+            last_leave_time TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_summary_session
+            ON attendance_summary (session_id);
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_summary_user
+            ON attendance_summary (user_id);
     `);
 
     // Ensure columns exist for older databases that may lack them
