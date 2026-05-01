@@ -93,6 +93,8 @@ Instructors running daily Discord sessions waste hours on repetitive tasks:
 - 📊 **Session info** — view active/all sessions with attendee and event counts
 - 🧾 **Activity event log** — generic event storage for future analysis
 - ⚙️ **Event-driven architecture** — fully decoupled, scalable
+- 🎓 **Attendance Classification** — automatically classifies users as `ON_TIME`, `LATE`, `LEFT_EARLY`, or `ABSENT` at session end based on configurable thresholds
+- 🧪 **Chaos-Tested Reliability** — algorithmically handles overlapping/out-of-order Discord voice events via chronological interval merging
 
 ---
 
@@ -202,7 +204,7 @@ You should see `Logged in as <BotName>#0000` in the console.
 - [x] Event-driven modular architecture
 - [x] Session auto-end timers
 - [x] Empty channel detection
-- [ ] Participation scoring & engagement classification
+- [x] Participation scoring & engagement classification
 - [ ] Session summaries & export (CSV)
 - [ ] Next.js dashboard for instructors
 - [ ] Scheduled sessions (API triggers)
