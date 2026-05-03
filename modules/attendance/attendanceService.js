@@ -206,6 +206,13 @@ function finalizeSessionAttendance(sessionId) {
 
         const insertedCount = attendanceSummaryModel.insertMany(summaries);
         logger.log(`Finalized attendance for session #${sessionId}. Processed ${insertedCount} users.`);
+        
+        if (insertedCount > 0) {
+            // Emit event to trigger summary generation
+            eventBus.emit(Events.ATTENDANCE_FINALIZED, { sessionId });
+        } else {
+            logger.warn(`No attendance data generated for session #${sessionId}, skipping summary event.`);
+        }
     } catch (error) {
         logger.error(`attendanceService.finalizeSessionAttendance error: ${error.message}`, {
             sessionId,

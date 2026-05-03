@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 
 const attendanceService = require('./attendance/attendanceService');
+const sessionSummaryService = require('./sessions/sessionSummaryService');
 const activityLogger = require('./activity/activityLogger');
 const logger = require('../utils/logger');
 
@@ -16,6 +17,7 @@ function registerAll() {
 
     try {
         attendanceService.register();
+        sessionSummaryService.register();
         activityLogger.register();
         logger.log('All modules registered.');
     } catch (error) {

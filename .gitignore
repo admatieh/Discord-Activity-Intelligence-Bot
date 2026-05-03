@@ -39,3 +39,9 @@ coverage/
 
 # Testing
 tests/reports/
+
+# Database
+data.db
+data.db-shm
+data.db-wal
+.DS_Store
