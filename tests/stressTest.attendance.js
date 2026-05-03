@@ -34,6 +34,7 @@ function joinSession(userId, channelId, offsetMinutes) {
     eventBus.emit(Events.VOICE_JOIN, {
         userId,
         channelId,
+        sessionId: sessionService.getSessionId(channelId),
         timestamp: getSimTime(offsetMinutes)
     });
 }
@@ -42,6 +43,7 @@ function leaveSession(userId, channelId, offsetMinutes) {
     eventBus.emit(Events.VOICE_LEAVE, {
         userId,
         channelId,
+        sessionId: sessionService.getSessionId(channelId),
         timestamp: getSimTime(offsetMinutes),
         remainingMembers: 1
     });

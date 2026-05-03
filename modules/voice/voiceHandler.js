@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 const { eventBus, Events } = require('../../core/eventBus');
+const sessionService = require('../sessions/sessionService');
 const logger = require('../../utils/logger');
 
 /**
@@ -32,21 +33,40 @@ function handleVoiceStateUpdate(oldState, newState) {
         // Ignore bots
         if (newState.member?.user?.bot) return;
 
-        // No channel change — mute/deafen/etc. — ignore
-        if (oldChannelId === newChannelId) return;
+        const isMuted = newState.selfMute || newState.serverMute;
+
+        const oldSessionId = oldChannelId && sessionService.isSessionActive(oldChannelId) ? sessionService.getSessionId(oldChannelId) : null;
+        const newSessionId = newChannelId && sessionService.isSessionActive(newChannelId) ? sessionService.getSessionId(newChannelId) : null;
+
+        // No channel change — mute/deafen/etc.
+        if (oldChannelId === newChannelId) {
+            const wasMuted = oldState.selfMute || oldState.serverMute;
+            if (wasMuted !== isMuted) {
+                if (newSessionId) {
+                    if (!wasMuted && isMuted) {
+                        eventBus.emit(Events.VOICE_MUTE, { userId, channelId: newChannelId, sessionId: newSessionId, timestamp });
+                    } else if (wasMuted && !isMuted) {
+                        eventBus.emit(Events.VOICE_UNMUTE, { userId, channelId: newChannelId, sessionId: newSessionId, timestamp });
+                    }
+                }
+            }
+            return;
+        }
 
         if (!oldChannelId && newChannelId) {
             // Join
-            eventBus.emit(Events.VOICE_JOIN, { userId, channelId: newChannelId, sessionId: null, timestamp });
+            logger.log(`Emitting VOICE_JOIN with sessionId=${newSessionId}`);
+            eventBus.emit(Events.VOICE_JOIN, { userId, channelId: newChannelId, sessionId: newSessionId, timestamp, isMuted });
         } else if (oldChannelId && !newChannelId) {
             // Leave
             const remaining = countHumanMembers(oldState.channel);
-            eventBus.emit(Events.VOICE_LEAVE, { userId, channelId: oldChannelId, sessionId: null, timestamp, remainingMembers: remaining });
+            eventBus.emit(Events.VOICE_LEAVE, { userId, channelId: oldChannelId, sessionId: oldSessionId, timestamp, remainingMembers: remaining });
         } else if (oldChannelId && newChannelId) {
             // Switch — emit leave then join
             const remaining = countHumanMembers(oldState.channel);
-            eventBus.emit(Events.VOICE_LEAVE, { userId, channelId: oldChannelId, sessionId: null, timestamp, remainingMembers: remaining });
-            eventBus.emit(Events.VOICE_JOIN, { userId, channelId: newChannelId, sessionId: null, timestamp });
+            eventBus.emit(Events.VOICE_LEAVE, { userId, channelId: oldChannelId, sessionId: oldSessionId, timestamp, remainingMembers: remaining });
+            logger.log(`Emitting VOICE_JOIN with sessionId=${newSessionId}`);
+            eventBus.emit(Events.VOICE_JOIN, { userId, channelId: newChannelId, sessionId: newSessionId, timestamp, isMuted });
         }
     } catch (error) {
         logger.error(`voiceHandler error: ${error.message}`, {

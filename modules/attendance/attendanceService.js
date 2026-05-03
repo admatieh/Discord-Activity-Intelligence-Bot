@@ -25,11 +25,9 @@ let initialized = false;
 // Event handlers
 // ---------------------------------------------------------------------------
 
-function onVoiceJoin({ userId, channelId, timestamp }) {
+function onVoiceJoin({ userId, channelId, timestamp, sessionId: payloadSessionId }) {
     try {
-        if (!sessionService.isSessionActive(channelId)) return;
-
-        const sessionId = sessionService.getSessionId(channelId);
+        const sessionId = payloadSessionId || sessionService.getSessionId(channelId);
         if (!sessionId) return;
 
         // Cancel empty-channel grace if someone rejoined
@@ -64,11 +62,9 @@ function onVoiceJoin({ userId, channelId, timestamp }) {
     }
 }
 
-function onVoiceLeave({ userId, channelId, timestamp, remainingMembers }) {
+function onVoiceLeave({ userId, channelId, timestamp, remainingMembers, sessionId: payloadSessionId }) {
     try {
-        if (!sessionService.isSessionActive(channelId)) return;
-
-        const sessionId = sessionService.getSessionId(channelId);
+        const sessionId = payloadSessionId || sessionService.getSessionId(channelId);
         if (!sessionId) return;
 
         const now = timestamp || new Date().toISOString();

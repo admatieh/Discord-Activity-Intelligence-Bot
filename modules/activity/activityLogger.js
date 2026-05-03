@@ -52,6 +52,32 @@ function register() {
         }
     });
 
+    eventBus.on(Events.VOICE_MUTE, (payload) => {
+        try {
+            activityEventModel.insertEvent({
+                type: Events.VOICE_MUTE,
+                userId: payload.userId,
+                channelId: payload.channelId,
+                sessionId: payload.sessionId || null
+            });
+        } catch (err) {
+            logger.error(`activityLogger VOICE_MUTE listener crash: ${err.message}`);
+        }
+    });
+
+    eventBus.on(Events.VOICE_UNMUTE, (payload) => {
+        try {
+            activityEventModel.insertEvent({
+                type: Events.VOICE_UNMUTE,
+                userId: payload.userId,
+                channelId: payload.channelId,
+                sessionId: payload.sessionId || null
+            });
+        } catch (err) {
+            logger.error(`activityLogger VOICE_UNMUTE listener crash: ${err.message}`);
+        }
+    });
+
     logger.log('ActivityLogger registered on event bus.');
 }
 

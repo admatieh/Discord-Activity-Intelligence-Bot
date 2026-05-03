@@ -26,6 +26,7 @@ function join(userId, min) {
     eventBus.emit(Events.VOICE_JOIN, {
         userId,
         channelId,
+        sessionId: sessionService.getSessionId(channelId),
         timestamp: offsetMin(min)
     });
 }
@@ -35,6 +36,7 @@ function leave(userId, min) {
     eventBus.emit(Events.VOICE_LEAVE, {
         userId,
         channelId,
+        sessionId: sessionService.getSessionId(channelId),
         timestamp: offsetMin(min),
         remainingMembers: 1 // prevent empty grace trigger
     });

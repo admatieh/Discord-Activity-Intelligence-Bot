@@ -117,6 +117,18 @@ function initializeSchema() {
 
         CREATE INDEX IF NOT EXISTS idx_attendance_summary_user
             ON attendance_summary (user_id);
+
+        CREATE TABLE IF NOT EXISTS voice_activity_intervals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_voice_activity_session_user
+            ON voice_activity_intervals (session_id, user_id);
     `);
 
     // Ensure columns exist for older databases that may lack them
