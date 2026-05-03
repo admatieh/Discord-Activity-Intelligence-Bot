@@ -41,7 +41,7 @@ coverage/
 tests/reports/
 
 # Database
-data.db
-data.db-shm
-data.db-wal
+*.db
+*.db-shm
+*.db-wal
 .DS_Store
