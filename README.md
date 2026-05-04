@@ -22,42 +22,29 @@ The bot uses an **event-driven, modular architecture** built around a central ev
 
 All domain events flow through `core/eventBus.js` (Node.js EventEmitter). Modules subscribe to events — no direct coupling between producers and consumers.
 
-**Events:**
+**Key Events:**
 | Event | Emitted By | Consumed By |
 |-------|-----------|-------------|
-| `VOICE_JOIN` | voiceHandler | attendanceService, activityLogger |
-| `VOICE_LEAVE` | voiceHandler | attendanceService, activityLogger |
-| `SESSION_STARTED` | sessionService | (future listeners) |
-| `SESSION_ENDED` | sessionService | (future listeners) |
-
-### Event Flow
-
-```
-Discord voiceStateUpdate → voiceHandler → eventBus.emit() → listeners
-```
+| `VOICE_JOIN` | voiceHandler | attendanceService, voiceActivityService |
+| `VOICE_LEAVE` | voiceHandler | attendanceService, voiceActivityService |
+| `VOICE_MUTE/UNMUTE` | voiceHandler | voiceActivityService |
+| `MESSAGE_CREATE/REPLY` | messageHandler | interactionService |
+| `SESSION_STARTED` | sessionService | activityLogger |
+| `SESSION_ENDED` | sessionService | attendanceService, voiceActivityService |
+| `ATTENDANCE_FINALIZED` | attendanceService | participationService |
+| `PARTICIPATION_FINALIZED` | participationService | sessionSummaryService |
 
 ### Modules by Domain
 
 ```
 modules/
-  sessions/        → Session lifecycle (start, end, switch, timers)
-  attendance/      → Voice attendance tracking (join/leave per session)
+  sessions/        → Session lifecycle, timers, and summary orchestration
+  attendance/      → Voice attendance tracking & status classification
+  participation/   → Participation scoring (0-100) & engagement analysis
+  interaction/     → Text-based interaction tracking (messages, replies, reactions)
+  activity/        → Generic event logging & voice activity interval tracking
+  users/           → Guild member synchronization to DB
   voice/           → Discord voice event → event bus adapter
-  users/           → Guild member sync to DB
-  activity/        → Generic activity event logging
-```
-
-### Standard Event Payload
-
-All events use a consistent payload format:
-
-```json
-{
-  "userId": "string",
-  "channelId": "string",
-  "sessionId": "number|null",
-  "timestamp": "ISO string"
-}
 ```
 
 ---
@@ -65,36 +52,25 @@ All events use a consistent payload format:
 ## 🔑 Key Concepts
 
 - **Session** — Voice channel scoped. One active session per channel. Auto-ends via timer or empty-channel grace.
-- **Attendance** — First join per user per session. Recorded as attendee on `VOICE_JOIN`.
-- **Voice Events** — Join/leave intervals tracked per user per session for duration analysis.
-- **Activity Events** — Generic event storage (`activity_events` table) for future extensibility.
-
----
-
-## 🎯 What Problem Does It Solve?
-
-Instructors running daily Discord sessions waste hours on repetitive tasks:
-- Manually taking attendance
-- Trying to guess who was really engaged
-- Forgetting what was discussed last week
-- Having no easy way to view historical activity
-
-**This bot eliminates all that manual work** by turning raw Discord activity into meaningful, structured data — automatically.
+- **Attendance** — Users are classified as `ON_TIME`, `LATE`, `LEFT_EARLY`, or `ABSENT` based on configurable duration thresholds.
+- **Participation Score** — A deterministic 0–100 score calculated from speaking ratio, interaction volume, and attendance status.
+- **Interactions** — Tracking of messages, replies, and reactions to measure social engagement.
 
 ---
 
 ## ⚡ Features
 
-- 🎙️ **Voice‑channel attendance** — accurate, based on real join/leave events
-- 🛡️ **Permission guard** — only instructors can control sessions
-- ⏱️ **Auto-end timers** — sessions close after configured duration
-- 🏚️ **Empty channel detection** — auto-ends session when channel empties (with grace period)
-- 🔄 **Session switching** — move tracking to a different voice channel
-- 📊 **Session info** — view active/all sessions with attendee and event counts
-- 🧾 **Activity event log** — generic event storage for future analysis
-- ⚙️ **Event-driven architecture** — fully decoupled, scalable
-- 🎓 **Attendance Classification** — automatically classifies users as `ON_TIME`, `LATE`, `LEFT_EARLY`, or `ABSENT` at session end based on configurable thresholds
-- 🧪 **Chaos-Tested Reliability** — algorithmically handles overlapping/out-of-order Discord voice events via chronological interval merging
+- 🎙️ **Voice‑channel attendance** — accurate, based on real join/leave events.
+- 📊 **Participation Scoring** — Evaluates engagement using weighted metrics:
+  - **Speaking Time** (50%): Ratio of session spent unmuted.
+  - **Interaction Volume** (30%): Count of messages, replies, and reactions.
+  - **Attendance Status** (20%): Bonus for punctuality.
+- 🛡️ **Permission guard** — only instructors can control sessions.
+- ⏱️ **Auto-end timers** — sessions close after configured duration.
+- 🏚️ **Empty channel detection** — auto-ends session when channel empties (with grace period).
+- 🔄 **Session switching** — move tracking to a different voice channel seamlessly.
+- ⚙️ **Event-driven architecture** — fully decoupled modules and scalable event handling.
+- 🧪 **Stress Tested** — Validated via a "Chaos Test" simulating 80+ users with rapid joins/leaves and mute spam.
 
 ---
 
@@ -105,122 +81,58 @@ Instructors running daily Discord sessions waste hours on repetitive tasks:
 | Bot            | Node.js + discord.js v14 |
 | Database       | SQLite (better-sqlite3) |
 | Event System   | Node.js EventEmitter |
-| Dashboard (future) | Next.js           |
-
----
-
-## 🚧 Scalability Design
-
-Adding new features requires **zero core refactoring**:
-
-```js
-// Example: modules/notifications/notificationService.js
-const { eventBus, Events } = require('../../core/eventBus');
-
-function register() {
-    eventBus.on(Events.SESSION_STARTED, ({ sessionId, channelId }) => {
-        // send notification
-    });
-}
-
-module.exports = { register };
-```
-
-Then add one line to `modules/index.js` → done.
-
----
-
-## 🚀 Getting Started (Run Locally)
-
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18 or higher)
-- A Discord bot token ([Discord Developer Portal](https://discord.com/developers/applications))
-- A Discord server where you have the `Manage Server` permission
-
-### 1. Clone the Repository
-```bash
-git clone https://github.com/admatieh/Discord-Activity-Intelligence-Bot
-cd Discord-Activity-Intelligence-Bot
-```
-
-### 2. Install Dependencies
-```bash
-npm install
-```
-
-### 3. Configure Environment Variables
-Rename `.env.example` to `.env` and fill in your token:
-
-```env
-DISCORD_TOKEN=your_bot_token_here
-```
-
-### 4. Invite the Bot to Your Server
-Use the OAuth2 URL generator with the following permissions:
-- Send Messages
-- Read Message History
-- Connect and Speak (if using voice tracking)
-- Use Voice Activity (optional)
-
-### 5. Run the Bot
-```bash
-npm start
-```
-You should see `Logged in as <BotName>#0000` in the console.
+| Command Parser | Custom Named-Argument System |
 
 ---
 
 ## 💡 Usage (Current Commands)
 
+Commands now support a robust **named-argument system** (`--key value`).
+
 | Command | Action |
 |---------|--------|
 | `!ping` | Check if bot is responsive |
-| `!session-start [minutes]` | Start tracking in your voice channel (default: 60 min) |
-| `!session-end [all\|here\|id\|name]` | End a session |
-| `!session-switch [here\|name]` | Move tracking to another voice channel |
-| `!session-info [all\|open\|id]` | View session details |
-| `!whoareyou` | Get details about the bot's purpose |
-| `!whoami` | Check your identity |
-| `!welcome` | Send a welcome message to the channel |
+| `!session-start [min]` | Start tracking (e.g. `!session-start 90`) |
+| `!session-end --id 5` | End a specific session or use `all`, `here`, `name` |
+| `!session-info --all` | View session details |
+| `!session-switch --to "General"` | Move tracking to another channel |
+| `!help` | Dynamically generate help documentation for all commands |
 
 ---
 
-## 🛠️ Development Notes
+## 🧪 Testing & Validation
 
-- **Listeners must register once** — all modules use `initialized` guard pattern
-- **Event payloads must stay consistent** — `{ userId, channelId, sessionId, timestamp }`
-- **Session cache** — in-memory `Map<channelId, sessionId>` avoids repeated DB lookups
-- **Error isolation** — each event listener is wrapped in try/catch so one failure doesn't affect others
-- **Startup order** — DB → Models → Services → Event listeners → Discord login
+The bot includes a comprehensive **Full System Stress Test** (`tests/fullSystemStressTest.test.js`) that simulates realistic, high-chaos environments:
+- **Session Chaos:** Rapidly joining/leaving and muting/unmuting.
+- **Concurrency:** Handling 50+ simultaneous users and hundreds of events.
+- **Data Integrity:** Validating that no open intervals remain and scores are calculated correctly.
+
+Run the stress test:
+```bash
+node tests/fullSystemStressTest.test.js
+```
 
 ---
 
 ## 🗺️ Roadmap
 
-- [x] Bot setup with command handling
+- [x] Bot setup with modular command handling
 - [x] Voice channel attendance tracking
 - [x] Persistent storage (SQLite)
 - [x] Role‑based permission checks
 - [x] Event-driven modular architecture
-- [x] Session auto-end timers
-- [x] Empty channel detection
+- [x] Session auto-end timers & empty channel detection
+- [x] Interaction tracking (Messages/Replies/Reactions)
 - [x] Participation scoring & engagement classification
-- [ ] Session summaries & export (CSV)
-- [ ] Next.js dashboard for instructors
-- [ ] Scheduled sessions (API triggers)
+- [ ] Session summaries export (CSV/PDF)
+- [ ] Web-based Next.js dashboard for instructors
+- [ ] Real-time engagement alerts (e.g. "User X has been silent")
 
 ---
 
 ## 🤝 Contributing
 
-This is a personal graduation project, but suggestions and improvements are welcome!
-Feel free to open an issue or reach out with ideas.
-
----
-
-## 📄 License
-
-This project is for educational purposes. License details to be added soon.
+This is a personal graduation project, but suggestions and improvements are welcome! Feel free to open an issue or reach out with ideas.
 
 ---
 
