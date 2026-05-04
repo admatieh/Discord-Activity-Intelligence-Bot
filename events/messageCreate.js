@@ -15,6 +15,10 @@ module.exports = {
     execute(message) {
         if (message.author.bot) return;
 
+        // Interaction Data Layer
+        const interactionService = require('../modules/interaction/interactionService');
+        interactionService.handleMessageCreate(message);
+
         const content = message.content.trim();
         if (!content.startsWith(PREFIX)) return;
 

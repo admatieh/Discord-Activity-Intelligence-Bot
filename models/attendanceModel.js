@@ -47,8 +47,24 @@ function getAttendeeCount(sessionId) {
     }
 }
 
+/**
+ * Check if a user is an attendee of a session.
+ */
+function isUserAttendee(sessionId, userId) {
+    try {
+        const row = db.prepare(
+            'SELECT 1 FROM attendees WHERE session_id = ? AND user_id = ?'
+        ).get(sessionId, userId);
+        return !!row;
+    } catch (error) {
+        logger.error(`attendanceModel.isUserAttendee error: ${error.message}`);
+        return false;
+    }
+}
+
 module.exports = {
     addAttendee,
     getAttendeesBySession,
-    getAttendeeCount
+    getAttendeeCount,
+    isUserAttendee
 };

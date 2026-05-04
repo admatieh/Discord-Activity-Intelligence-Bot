@@ -78,6 +78,48 @@ function register() {
         }
     });
 
+    eventBus.on(Events.MESSAGE_CREATE, (payload) => {
+        try {
+            activityEventModel.insertEvent({
+                type: Events.MESSAGE_CREATE,
+                userId: payload.userId,
+                channelId: payload.channelId,
+                sessionId: payload.sessionId,
+                metadata: payload.metadata || null
+            });
+        } catch (err) {
+            logger.error(`activityLogger MESSAGE_CREATE listener crash: ${err.message}`);
+        }
+    });
+
+    eventBus.on(Events.MESSAGE_REPLY, (payload) => {
+        try {
+            activityEventModel.insertEvent({
+                type: Events.MESSAGE_REPLY,
+                userId: payload.userId,
+                channelId: payload.channelId,
+                sessionId: payload.sessionId,
+                metadata: payload.metadata || null
+            });
+        } catch (err) {
+            logger.error(`activityLogger MESSAGE_REPLY listener crash: ${err.message}`);
+        }
+    });
+
+    eventBus.on(Events.REACTION_ADD, (payload) => {
+        try {
+            activityEventModel.insertEvent({
+                type: Events.REACTION_ADD,
+                userId: payload.userId,
+                channelId: payload.channelId,
+                sessionId: payload.sessionId,
+                metadata: payload.metadata || null
+            });
+        } catch (err) {
+            logger.error(`activityLogger REACTION_ADD listener crash: ${err.message}`);
+        }
+    });
+
     logger.log('ActivityLogger registered on event bus.');
 }
 
