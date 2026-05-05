@@ -4,6 +4,7 @@ const sessionModel = require('../../models/sessionModel');
 const attendanceSummaryModel = require('../../models/attendanceSummaryModel');
 const logger = require('../../utils/logger');
 const { eventBus, Events } = require('../../core/eventBus');
+const { safeEmit } = require('../../utils/safeEmit');
 
 let initialized = false;
 
@@ -119,7 +120,7 @@ function register() {
             const summary = getSessionSummary(sessionId);
             if (summary) {
                 logger.log(`Session Summary ready for session #${sessionId}.`);
-                eventBus.emit(Events.SESSION_SUMMARY_READY, { sessionId, summary });
+                safeEmit(eventBus, Events.SESSION_SUMMARY_READY, { sessionId, summary });
             }
         } catch (err) {
             logger.error(`sessionSummaryService ATTENDANCE_FINALIZED listener crash: ${err.message}`);

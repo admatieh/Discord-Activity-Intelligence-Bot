@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 const { eventBus, Events } = require('../../core/eventBus');
+const { safeEmit } = require('../../utils/safeEmit');
 const sessionModel = require('../../models/sessionModel');
 const participationSummaryModel = require('../../models/participationSummaryModel');
 const { aggregateSession } = require('./participationAggregator');
@@ -93,7 +94,7 @@ function computeScores(sessionId) {
         logger.log(`Finalized participation for session #${sessionId}. Processed ${insertedCount} users.`);
 
         if (insertedCount > 0) {
-            eventBus.emit(Events.PARTICIPATION_FINALIZED, { sessionId });
+            safeEmit(eventBus, Events.PARTICIPATION_FINALIZED, { sessionId });
         }
     } catch (error) {
         logger.error(`participationService.computeScores error: ${error.message}`);

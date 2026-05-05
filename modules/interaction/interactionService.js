@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 const { eventBus, Events } = require('../../core/eventBus');
+const { safeEmit } = require('../../utils/safeEmit');
 const sessionService = require('../sessions/sessionService');
 const attendanceModel = require('../../models/attendanceModel');
 const logger = require('../../utils/logger');
@@ -46,9 +47,9 @@ function handleMessageCreate(message) {
         };
 
         if (isReply) {
-            eventBus.emit(Events.MESSAGE_REPLY, payload);
+            safeEmit(eventBus, Events.MESSAGE_REPLY, payload);
         } else {
-            eventBus.emit(Events.MESSAGE_CREATE, payload);
+            safeEmit(eventBus, Events.MESSAGE_CREATE, payload);
         }
     } catch (error) {
         logger.error(`interactionService.handleMessageCreate error: ${error.message}`);
@@ -87,7 +88,7 @@ function handleReactionAdd(reaction, user) {
             metadata: JSON.stringify({ messageId: reaction.message.id, emoji: reaction.emoji.name })
         };
 
-        eventBus.emit(Events.REACTION_ADD, payload);
+        safeEmit(eventBus, Events.REACTION_ADD, payload);
     } catch (error) {
         logger.error(`interactionService.handleReactionAdd error: ${error.message}`);
     }

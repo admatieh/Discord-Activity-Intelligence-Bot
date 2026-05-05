@@ -18,6 +18,7 @@ const attendanceSummaryModel = require('../../models/attendanceSummaryModel');
 const logger = require('../../utils/logger');
 const { ATTENDANCE } = require('../../config/constants');
 const { eventBus, Events } = require('../../core/eventBus');
+const { safeEmit } = require('../../utils/safeEmit');
 
 let initialized = false;
 
@@ -205,7 +206,7 @@ function finalizeSessionAttendance(sessionId) {
         
         if (insertedCount > 0) {
             // Emit event to trigger summary generation
-            eventBus.emit(Events.ATTENDANCE_FINALIZED, { sessionId });
+            safeEmit(eventBus, Events.ATTENDANCE_FINALIZED, { sessionId });
         } else {
             logger.warn(`No attendance data generated for session #${sessionId}, skipping summary event.`);
         }

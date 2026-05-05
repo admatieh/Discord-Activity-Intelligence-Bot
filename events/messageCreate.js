@@ -12,7 +12,7 @@ const PREFIX = '!';
 
 module.exports = {
     name: 'messageCreate',
-    execute(message) {
+    async execute(message) {
         if (message.author.bot) return;
 
         // Interaction Data Layer
@@ -30,17 +30,16 @@ module.exports = {
         if (!command) return;
 
         try {
-            // Pass parsed args + the commands map (for help system)
-            command.execute(message, parsed.positional, {
+            await Promise.resolve(command.execute(message, parsed.positional, {
                 parsed,
                 commands
-            });
-        } catch (error) {
-            logger.error(`Command '${commandName}' threw an error: ${error.message}`, {
-                commandName,
-                error: error.message
-            });
-            message.reply('❌ An error occurred while executing that command.').catch(() => {});
+            }));
+        } catch (err) {
+            console.error(`[COMMAND ERROR] ${commandName}`, err);
+
+            try {
+                await message.reply('❌ Something went wrong while executing this command.');
+            } catch (_) { }
         }
     }
 };

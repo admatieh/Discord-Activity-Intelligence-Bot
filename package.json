@@ -5,7 +5,11 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start:pm2": "pm2 start index.js --name discord-bot",
+    "stop:pm2": "pm2 stop discord-bot",
+    "restart:pm2": "pm2 restart discord-bot",
+    "logs": "pm2 logs discord-bot"
   },
   "keywords": [],
   "author": "",

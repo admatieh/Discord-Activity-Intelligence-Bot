@@ -19,6 +19,7 @@ const attendanceModel = require('../../models/attendanceModel');
 const logger = require('../../utils/logger');
 const { DEFAULT_SESSION_DURATION, EMPTY_CHANNEL_GRACE_MS } = require('../../config/constants');
 const { eventBus, Events } = require('../../core/eventBus');
+const { safeEmit } = require('../../utils/safeEmit');
 const voiceActivityModel = require('../../models/voiceActivityModel');
 
 // In-memory maps
@@ -116,7 +117,7 @@ function startSession(voiceChannelId, triggeredBy, options = {}) {
         );
 
         // Emit SESSION_STARTED
-        eventBus.emit(Events.SESSION_STARTED, {
+        safeEmit(eventBus, Events.SESSION_STARTED, {
             userId: triggeredBy,
             channelId: voiceChannelId,
             sessionId,
@@ -195,7 +196,7 @@ function endSessionById(sessionId, reason = 'Manual end') {
         });
 
         // Emit SESSION_ENDED
-        eventBus.emit(Events.SESSION_ENDED, {
+        safeEmit(eventBus, Events.SESSION_ENDED, {
             userId: session.triggered_by,
             channelId: session.channel_id,
             sessionId,
@@ -374,7 +375,7 @@ function bootstrapChannelUsers(channel, sessionId) {
             const openEvent = voiceEventModel.getOpenEvent(sessionId, member.id);
             
             if (!openInterval && !openEvent) {
-                eventBus.emit(Events.VOICE_JOIN, {
+                safeEmit(eventBus, Events.VOICE_JOIN, {
                     userId: member.id,
                     channelId: channel.id,
                     sessionId: sessionId,
