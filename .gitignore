@@ -45,3 +45,5 @@ tests/reports/
 *.db-shm
 *.db-wal
 .DS_Store
+
+.temp_output.txt

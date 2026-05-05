@@ -11,6 +11,7 @@
 const sessionService = require('../modules/sessions/sessionService');
 const sessionModel = require('../models/sessionModel');
 const logger = require('../utils/logger');
+const { sendSplitMessage } = require('../utils/messageSender');
 
 module.exports = {
     name: 'session-info',
@@ -22,7 +23,7 @@ module.exports = {
         { name: 'view', type: 'string', required: false, description: '"all" for all sessions, "open" for active sessions only' },
         { name: 'id', type: 'number', required: false, description: 'Specific session ID for detailed info' }
     ],
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
         try {
             if (!message.guild) {
                 return message.reply('❌ Server only.');
@@ -40,7 +41,8 @@ module.exports = {
                     const status = s.end_time ? '🔴 Ended' : '🟢 Active';
                     return `**#${s.id}** | ${status} | Channel: ${s.channel_id} | Started: ${s.start_time}`;
                 });
-                return message.reply(`📋 **All Sessions (${sessions.length}):**\n${lines.join('\n')}`);
+
+                return sendSplitMessage(message, `📋 **All Sessions (${sessions.length}):**`, lines);
             }
 
             // --view open
@@ -52,7 +54,8 @@ module.exports = {
                 const lines = sessions.map(s =>
                     `**#${s.id}** | Channel: ${s.channel_id} | Started: ${s.start_time} | Auto-end: ${s.auto_end_at}`
                 );
-                return message.reply(`📋 **Active Sessions (${sessions.length}):**\n${lines.join('\n')}`);
+
+                return sendSplitMessage(message, `📋 **Active Sessions (${sessions.length}):**`, lines);
             }
 
             // --id <sessionId>

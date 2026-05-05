@@ -14,6 +14,7 @@
 const db = require('../../database/db');
 const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
+const { sendSplitMessage } = require('../../utils/messageSender');
 
 const DEFAULT_LIMIT  = 20;
 const MAX_LIMIT      = 50;
@@ -82,32 +83,7 @@ module.exports = {
             const levelLabel = level ? ` — level: ${level.toUpperCase()}` : '';
             const title = `📄 **Logs${levelLabel}** (showing ${rows.length})`;
             
-            // Chunk lines so they fit within ~1900 chars per message
-            let currentChunk = [];
-            let currentLen = 0;
-            const messages = [];
-            
-            for (const line of lines) {
-                if (currentLen + line.length > 1900) {
-                    messages.push(currentChunk.join('\n'));
-                    currentChunk = [];
-                    currentLen = 0;
-                }
-                currentChunk.push(line);
-                currentLen += line.length + 1; // +1 for newline
-            }
-            if (currentChunk.length > 0) {
-                messages.push(currentChunk.join('\n'));
-            }
-
-            for (let i = 0; i < messages.length; i++) {
-                if (i === 0) {
-                    await message.reply(`${title}\n\`\`\`\n${messages[i]}\n\`\`\``);
-                } else {
-                    await message.channel.send(`\`\`\`\n${messages[i]}\n\`\`\``);
-                }
-            }
-            return;
+            return sendSplitMessage(message, title, lines, { useCodeBlock: true });
         } catch (error) {
             logger.error(`logs command error: ${error.message}`, { error: error.message });
             return message.reply('❌ An error occurred while querying logs.');

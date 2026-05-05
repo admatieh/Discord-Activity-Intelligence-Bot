@@ -58,11 +58,11 @@ module.exports = {
             }
 
             const summary = sessionSummaryService.getSessionSummary(sessionId);
-            
+
             if (!summary || summary.totalUsers === 0) {
                 return message.reply(`📊 Session #${sessionId} has no attendance data.`);
             }
-            
+
             const formatted = sessionSummaryService.formatSummary(summary);
 
             return message.reply({ content: formatted });
