@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: 'ping',
+    category: 'general',
     description: 'Check if the bot is online and responsive.',
     usage: '!ping',
     options: [],

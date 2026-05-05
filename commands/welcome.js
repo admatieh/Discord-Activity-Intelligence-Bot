@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: 'welcome',
+    category: 'general',
     description: 'Send a welcome message to the current channel.',
     usage: '!welcome',
     options: [],

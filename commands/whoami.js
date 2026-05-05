@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: 'whoami',
+    category: 'general',
     description: 'Display your Discord identity.',
     usage: '!whoami',
     options: [],

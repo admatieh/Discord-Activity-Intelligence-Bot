@@ -11,6 +11,8 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: 'session-start',
+    category: 'session',
+    aliases: ['start'],
     description: 'Start a voice tracking session in a channel.',
     usage: '!session-start --duration <minutes> --channel <#channel>',
     options: [
@@ -55,6 +57,12 @@ module.exports = {
             const result = sessionService.startSession(voiceChannel.id, message.author.tag, {
                 durationMinutes: duration
             });
+
+            if (result.success) {
+                sessionService.bootstrapChannelUsers(voiceChannel, result.sessionId);
+                sessionService.ensureChannelState(voiceChannel);
+            }
+
             return message.reply(result.message);
         } catch (error) {
             logger.error(`session-start command error: ${error.message}`, { error: error.message });

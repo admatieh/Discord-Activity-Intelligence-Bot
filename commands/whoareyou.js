@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: 'whoareyou',
+    category: 'general',
     description: 'Learn what this bot does.',
     usage: '!whoareyou',
     options: [],

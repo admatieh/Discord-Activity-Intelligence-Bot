@@ -7,7 +7,166 @@ PREFIX: !
 
 
 -------------------------------------
-1. ping
+1. attendance
+-------------------------------------
+Description: Show attendance summary for a session.
+Usage:       !attendance [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+2. attendance-raw
+-------------------------------------
+Description: Raw dump of all attendance_summary rows for a session.
+Usage:       !attendance-raw [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+3. attendance-user
+-------------------------------------
+Description: Show a user's attendance history across all sessions.
+Usage:       !attendance-user --user <@mention|id>
+Options:     
+  --user       string   (required)   User mention or ID
+
+
+-------------------------------------
+4. db-stats
+-------------------------------------
+Description: Show row counts for all major database tables (instructor only).
+Usage:       !db-stats
+Options:     None
+
+
+-------------------------------------
+5. health-check
+-------------------------------------
+Description: Validate system data integrity across all tables (instructor only).
+Usage:       !health-check
+Options:     None
+
+
+-------------------------------------
+6. help
+-------------------------------------
+Description: Show a list of all commands or details about a specific command/category.
+Usage:       !help [--category <name>] [--command <name>]
+Options:     
+  --category   string   (optional)   Filter commands by category (e.g., session, participation)
+  --command    string   (optional)   Command name to get detailed help for
+
+
+-------------------------------------
+7. interactions
+-------------------------------------
+Description: Show interaction event counts per user for a session.
+Usage:       !interactions [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+8. interactions-raw
+-------------------------------------
+Description: Raw dump of all activity_events rows for a session.
+Usage:       !interactions-raw [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+9. interactions-user
+-------------------------------------
+Description: Show all interaction events for a specific user in a session.
+Usage:       !interactions-user --user <@mention|id> [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --user       string   (required)   User mention or ID
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+10. logs
+-------------------------------------
+Description: Query recent log entries from the database (instructor only).
+Usage:       !logs [--level error|warn|info] [--limit <n>]
+Options:     
+  --level      string   (optional)   Filter by log level: error | warn | info
+  --limit      number   (optional)   Number of entries to show (default: 20, max: 50)
+
+
+-------------------------------------
+11. participation
+-------------------------------------
+Description: Show full participation scores for a session (sorted by score DESC).
+Usage:       !participation [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+12. participation-low
+-------------------------------------
+Description: Show bottom N participants by score for a session (lowest engagement).
+Usage:       !participation-low [--id <n>] [--channel <#ch>] [--latest] [--limit <n>]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+  --limit      number   (optional)   Number of results (default: 5, max: 15)
+
+
+-------------------------------------
+13. participation-raw
+-------------------------------------
+Description: Raw dump of all participation_summary rows for a session.
+Usage:       !participation-raw [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+14. participation-top
+-------------------------------------
+Description: Show top N participants by score for a session.
+Usage:       !participation-top [--id <n>] [--channel <#ch>] [--latest] [--limit <n>]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+  --limit      number   (optional)   Number of results (default: 5, max: 15)
+
+
+-------------------------------------
+15. participation-user
+-------------------------------------
+Description: Show a specific user's participation record for a session.
+Usage:       !participation-user --user <@mention|id> [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --user       string   (required)   User mention or ID
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+16. ping
 -------------------------------------
 Description: Check if the bot is online and responsive.
 Usage:       !ping
@@ -15,23 +174,123 @@ Options:     None
 
 
 -------------------------------------
-2. whoami
+17. session-debug
 -------------------------------------
-Description: Display your Discord identity.
-Usage:       !whoami
-Options:     None
+Description: Raw debug dump of a session (instructor only).
+Usage:       !session-debug [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
 
 
 -------------------------------------
-3. whoareyou
+18. session-end
 -------------------------------------
-Description: Learn what this bot does.
-Usage:       !whoareyou
-Options:     None
+Description: End an active voice tracking session.
+Usage:       !session-end [--target all|here] [--id <sessionId>] [--channel <#channel>]
+Options:     
+  --target     string   (optional)   "all" to end all sessions, "here" to end in your channel
+  --id         number   (optional)   Specific session ID to end
+  --channel    channel  (optional)   Target voice channel to end session in
 
 
 -------------------------------------
-4. welcome
+19. session-info
+-------------------------------------
+Description: View details about sessions (all, active, or specific).
+Usage:       !session-info [--view all|open] [--id <sessionId>]
+Options:     
+  --view       string   (optional)   "all" for all sessions, "open" for active sessions only
+  --id         number   (optional)   Specific session ID for detailed info
+
+
+-------------------------------------
+20. session-list
+-------------------------------------
+Description: List recent or active sessions.
+Usage:       !session-list [--view all|open]
+Options:     
+  --view       string   (optional)   "open" for active sessions only, "all" for recent history
+
+
+-------------------------------------
+21. session-start
+-------------------------------------
+Description: Start a voice tracking session in a channel.
+Usage:       !session-start --duration <minutes> --channel <#channel>
+Options:     
+  --duration   number   (optional)   Session length in minutes (default: 60)
+  --channel    channel  (optional)   Target voice channel (default: your current voice channel)
+
+
+-------------------------------------
+22. session-status
+-------------------------------------
+Description: Show detailed status for a session.
+Usage:       !session-status [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+23. session-summary
+-------------------------------------
+Description: Displays the attendance summary of a specific session.
+Usage:       !session-summary [--latest] [--id <number>] [--channel <mention>]
+Options:     
+  --latest     boolean  (optional)   Get the summary for the most recent session across all channels.
+  --id         number   (optional)   Get the summary for a specific session ID.
+  --channel    channel  (optional)   Get the most recent summary for a specific voice channel.
+
+
+-------------------------------------
+24. session-switch
+-------------------------------------
+Description: Move an active session to a different voice channel.
+Usage:       !session-switch --channel <#channel>
+Options:     
+  --channel    channel  (optional)   Target voice channel to switch to (default: your current voice channel)
+
+
+-------------------------------------
+25. voice-activity
+-------------------------------------
+Description: Show aggregated voice activity (speaking time) per user for a session.
+Usage:       !voice-activity [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+26. voice-raw
+-------------------------------------
+Description: Raw dump of all voice_activity_intervals rows for a session.
+Usage:       !voice-raw [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+27. voice-user
+-------------------------------------
+Description: Show all voice intervals for a specific user in a session.
+Usage:       !voice-user --user <@mention|id> [--id <n>] [--channel <#ch>] [--latest]
+Options:     
+  --user       string   (required)   User mention or ID
+  --id         number   (optional)   Session ID
+  --channel    channel  (optional)   Voice channel
+  --latest     boolean  (optional)   Use most recent session
+
+
+-------------------------------------
+28. welcome
 -------------------------------------
 Description: Send a welcome message to the current channel.
 Usage:       !welcome
@@ -39,79 +298,19 @@ Options:     None
 
 
 -------------------------------------
-5. session-start
+29. whoami
 -------------------------------------
-Description: Start a voice tracking session in a channel.
-Usage:       !session-start --duration <minutes> --channel <#channel>
-Options:
-  --duration   number    (optional)  Session length in minutes (default: 60)
-  --channel    channel   (optional)  Target voice channel (default: your current voice channel)
-
-Examples:
-  !session-start
-  !session-start --duration 120
-  !session-start --channel #study-room
-  !session-start --duration 90 --channel #study-room
+Description: Display your Discord identity.
+Usage:       !whoami
+Options:     None
 
 
 -------------------------------------
-6. session-end
+30. whoareyou
 -------------------------------------
-Description: End an active voice tracking session.
-Usage:       !session-end [--target all|here] [--id <sessionId>] [--channel <#channel>]
-Options:
-  --target     string    (optional)  "all" to end all sessions, "here" to end in your channel
-  --id         number    (optional)  Specific session ID to end
-  --channel    channel   (optional)  Target voice channel to end session in
-
-Examples:
-  !session-end
-  !session-end --target all
-  !session-end --id 42
-  !session-end --channel #study-room
-
-
--------------------------------------
-7. session-info
--------------------------------------
-Description: View details about sessions (all, active, or specific).
-Usage:       !session-info [--view all|open] [--id <sessionId>]
-Options:
-  --view       string    (optional)  "all" for all sessions, "open" for active sessions only
-  --id         number    (optional)  Specific session ID for detailed info
-
-Examples:
-  !session-info
-  !session-info --view all
-  !session-info --view open
-  !session-info --id 5
-
-
--------------------------------------
-8. session-switch
--------------------------------------
-Description: Move an active session to a different voice channel.
-Usage:       !session-switch --channel <#channel>
-Options:
-  --channel    channel   (optional)  Target voice channel to switch to (default: your current voice channel)
-
-Examples:
-  !session-switch
-  !session-switch --channel #lobby
-
-
--------------------------------------
-9. help
--------------------------------------
-Description: Show a list of all commands or details about a specific command.
-Usage:       !help [--command <name>]
-Options:
-  --command    string    (optional)  Command name to get detailed help for
-
-Examples:
-  !help
-  !help session-start
-  !help --command session-end
+Description: Learn what this bot does.
+Usage:       !whoareyou
+Options:     None
 
 
 =====================================
@@ -120,4 +319,4 @@ Examples:
 - All arguments use the --key value syntax
 - Positional arguments (e.g. !session-start 60) are NOT supported
 - Channel arguments accept #channel mentions or channel names
-- The bot requires the "Instructor" role or Administrator permission for session commands
+- The bot requires the 'Instructor' role or Administrator permission for session commands

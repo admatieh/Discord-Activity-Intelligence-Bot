@@ -6,6 +6,8 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: 'session-summary',
+    category: 'session',
+    aliases: ['summary'],
     description: 'Displays the attendance summary of a specific session.',
     usage: '!session-summary [--latest] [--id <number>] [--channel <mention>]',
     options: [

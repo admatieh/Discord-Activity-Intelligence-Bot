@@ -19,6 +19,7 @@ const attendanceModel = require('../../models/attendanceModel');
 const logger = require('../../utils/logger');
 const { DEFAULT_SESSION_DURATION, EMPTY_CHANNEL_GRACE_MS } = require('../../config/constants');
 const { eventBus, Events } = require('../../core/eventBus');
+const voiceActivityModel = require('../../models/voiceActivityModel');
 
 // In-memory maps
 const activeTimeouts = new Map();      // sessionId → auto-close timeout handle
@@ -340,6 +341,58 @@ function cancelEmptyGrace(channelId) {
     }
 }
 
+function ensureChannelState(channel) {
+    try {
+        if (!channel || !channel.members) return;
+        const humanCount = channel.members.filter(m => !m.user.bot).size;
+        if (humanCount === 0) {
+            startEmptyGrace(channel.id);
+        }
+    } catch (error) {
+        logger.error(`ensureChannelState error: ${error.message}`, { channelId: channel?.id });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrapping
+// ---------------------------------------------------------------------------
+
+function bootstrapChannelUsers(channel, sessionId) {
+    try {
+        if (!channel || !channel.members) return;
+        
+        const now = new Date().toISOString();
+        let count = 0;
+        
+        for (const [, member] of channel.members) {
+            if (member.user.bot) continue;
+            
+            const isMuted = member.voice?.selfMute || member.voice?.serverMute || false;
+            
+            // Prevent duplicates (check active voice intervals before emitting)
+            const openInterval = voiceActivityModel.getOpenInterval(sessionId, member.id);
+            const openEvent = voiceEventModel.getOpenEvent(sessionId, member.id);
+            
+            if (!openInterval && !openEvent) {
+                eventBus.emit(Events.VOICE_JOIN, {
+                    userId: member.id,
+                    channelId: channel.id,
+                    sessionId: sessionId,
+                    timestamp: now,
+                    isMuted
+                });
+                count++;
+            }
+        }
+        
+        if (count > 0) {
+            logger.log(`Bootstrapped ${count} users for session #${sessionId} in channel ${channel.id}.`);
+        }
+    } catch (error) {
+        logger.error(`bootstrapChannelUsers error: ${error.message}`);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // initSessions
 // ---------------------------------------------------------------------------
@@ -436,5 +489,7 @@ module.exports = {
     isSessionActive,
     getSessionId,
     getSessionInfo,
-    initSessions
+    initSessions,
+    bootstrapChannelUsers,
+    ensureChannelState
 };

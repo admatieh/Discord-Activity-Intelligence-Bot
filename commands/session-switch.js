@@ -13,6 +13,8 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: 'session-switch',
+    category: 'session',
+    aliases: ['switch'],
     description: 'Move an active session to a different voice channel.',
     usage: '!session-switch --channel <#channel>',
     options: [
@@ -74,6 +76,12 @@ module.exports = {
             }
 
             const result = sessionService.switchSessionChannel(sessionId, targetChannel.id);
+            
+            if (result.success) {
+                sessionService.bootstrapChannelUsers(targetChannel, sessionId);
+                sessionService.ensureChannelState(targetChannel);
+            }
+
             return message.reply(result.message);
         } catch (error) {
             logger.error(`session-switch command error: ${error.message}`, { error: error.message });

@@ -15,6 +15,8 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: 'session-end',
+    category: 'session',
+    aliases: ['stop', 'end'],
     description: 'End an active voice tracking session.',
     usage: '!session-end [--target all|here] [--id <sessionId>] [--channel <#channel>]',
     options: [

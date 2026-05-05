@@ -14,6 +14,8 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: 'session-info',
+    category: 'session',
+    aliases: ['info'],
     description: 'View details about sessions (all, active, or specific).',
     usage: '!session-info [--view all|open] [--id <sessionId>]',
     options: [
