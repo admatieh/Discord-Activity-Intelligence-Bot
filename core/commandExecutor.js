@@ -117,7 +117,7 @@ function logExecutionToDb(context, commandString, durationMs, success, errorMsg)
     try {
         const msg = success ? `Executed: ${commandString}` : `Failed: ${commandString} - ${errorMsg}`;
         const level = success ? 'info' : 'error';
-        const source = `dashboard-executor-\${context.user?.username || 'unknown'}`;
+        const source = `dashboard-executor-${context.user?.username || 'unknown'}`;
         
         const stmt = db.prepare('INSERT INTO logs (level, message, context) VALUES (?, ?, ?)');
         stmt.run(level, msg, JSON.stringify({

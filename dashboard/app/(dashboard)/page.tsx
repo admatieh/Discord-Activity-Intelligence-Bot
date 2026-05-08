@@ -1,199 +1,216 @@
 import { Topbar } from '@/components/dashboard/topbar'
 import { StatCard } from '@/components/dashboard/stat-card'
-import { LogLine } from '@/components/dashboard/log-line'
-import { cn } from '@/lib/utils'
 import {
   Radio,
   Users,
   MessageSquare,
-  Mic,
-  Zap,
-  AlertTriangle,
+  Calendar,
+  PlayCircle,
+  FileText,
+  Activity,
   CheckCircle,
-  Database,
-  Cpu,
-  Network,
+  AlertTriangle,
 } from 'lucide-react'
 import Link from 'next/link'
-import { OverviewCharts } from '@/components/dashboard/overview-charts'
-
-const recentLogs: any[] = []
-const activityData: any[] = []
-const voiceData: any[] = []
-const msgData: any[] = []
+import { getSessions, getLogs } from '@/server/repositories'
+import { dbExists } from '@/server/db'
 
 export default function OverviewPage() {
-  const activeSession = {
-    id: 'None',
-    channelName: 'Unknown',
-    participantCount: 0,
-    totalMessages: 0,
-    totalVoiceMinutes: 0,
-    avgScore: 0
-  }
+  const { data: allSessions, total: totalSessions } = getSessions(undefined, 100, 0)
+  const activeSessions = allSessions.filter(s => s.status === 'active')
+  const totalParticipants = allSessions.reduce((s, x) => s + (x.participantCount || 0), 0)
+
+  const activeSession = activeSessions[0] || null
 
   return (
     <div className="flex flex-col min-h-screen">
       <Topbar
-        title="Overview"
-        subtitle="system-metrics"
-        badge="LIVE"
-        badgeVariant="default"
+        title="Home"
+        subtitle="Instructor Workspace"
       />
 
-      <div className="p-5 space-y-5">
-        {/* System health banner */}
-        <div className="flex items-center gap-3 bg-status-online/5 border border-status-online/20 rounded px-4 py-2.5">
-          <CheckCircle className="w-3.5 h-3.5 text-status-online flex-shrink-0" />
-          <span className="text-xs font-mono text-status-online">ALL SYSTEMS OPERATIONAL</span>
-          <span className="ml-auto text-[10px] font-mono text-muted-foreground">Last checked 3s ago</span>
-        </div>
-
-        {/* Top stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
-          <StatCard
-            label="Active Sessions"
-            value={1}
-            icon={Radio}
-            iconColor="text-status-online"
-            trend="neutral"
-            delta="1 running"
-          />
-          <StatCard
-            label="Live Participants"
-            value={activeSession.participantCount}
-            icon={Users}
-            iconColor="text-chart-1"
-            trend="up"
-            delta="+2 since start"
-          />
-          <StatCard
-            label="Messages (session)"
-            value={activeSession.totalMessages}
-            icon={MessageSquare}
-            iconColor="text-chart-2"
-            trend="up"
-            delta="+14 last 5m"
-          />
-          <StatCard
-            label="Voice Minutes"
-            value={activeSession.totalVoiceMinutes}
-            icon={Mic}
-            iconColor="text-chart-3"
-            unit="min"
-            trend="up"
-            delta="+8 last 5m"
-          />
-          <StatCard
-            label="Avg Score"
-            value={activeSession.avgScore.toFixed(1)}
-            icon={Zap}
-            iconColor="text-status-warning"
-            trend="up"
-            delta="+1.2 this session"
-          />
-          <StatCard
-            label="Bot Latency"
-            value={42}
-            unit="ms"
-            icon={Network}
-            iconColor="text-chart-1"
-            trend="neutral"
-            delta="stable"
-          />
-        </div>
-
-        {/* Charts — client component to avoid SSR issues with Recharts */}
-        <OverviewCharts voiceData={voiceData} msgData={msgData} activityData={activityData} />
-
-        {/* System status */}
-        <div className="bg-card border border-border rounded p-4">
-            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-3">System Status</p>
-            <div className="space-y-2">
-              {[
-                { label: 'Gateway', status: 'OK', ms: '42ms', ok: true, icon: Network },
-                { label: 'Database', status: 'OK', ms: '8ms', ok: true, icon: Database },
-                { label: 'Event Bus', status: 'OK', ms: '0 queued', ok: true, icon: Zap },
-                { label: 'Score Engine', status: 'IDLE', ms: null, ok: true, icon: Cpu },
-                { label: 'Session Mgr', status: 'OK', ms: '1 active', ok: true, icon: Radio },
-                { label: 'Error Rate', status: '0.02%', ms: null, ok: true, icon: AlertTriangle },
-              ].map((item) => {
-                const Icon = item.icon
-                return (
-                  <div key={item.label} className="flex items-center gap-2 py-1 border-b border-border/50 last:border-0">
-                    <Icon className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                    <span className="text-xs font-mono text-muted-foreground flex-1">{item.label}</span>
-                    <span className={`text-[10px] font-mono font-semibold ${item.ok ? 'text-status-online' : 'text-status-error'}`}>
-                      {item.status}
-                    </span>
-                    {item.ms && <span className="text-[10px] font-mono text-muted-foreground/60">{item.ms}</span>}
-                  </div>
-                )
-              })}
-            </div>
+      <div className="p-6 space-y-8 max-w-6xl mx-auto w-full">
+        {/* System health banner - gentle style */}
+        {!dbExists && (
+          <div className="flex items-center gap-3 bg-status-warning/10 border-status-warning/30 border rounded-lg px-4 py-3">
+            <AlertTriangle className="w-5 h-5 text-status-warning flex-shrink-0" />
+            <span className="text-sm font-medium text-status-warning">
+              System notice: Database connection missing. Please configure your environment.
+            </span>
           </div>
+        )}
 
-        {/* Active session + recent logs */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-          {/* Active session */}
-          <div className="bg-card border border-border rounded p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Active Session</p>
-              <Link href="/sessions" className="text-[10px] font-mono text-primary hover:underline">
-                view all →
-              </Link>
-            </div>
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-online opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-status-online" />
-                  </span>
-                  <span className="text-base font-mono font-semibold">#{activeSession.channelName}</span>
+        {/* Welcome Section */}
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight mb-2">Welcome back.</h1>
+          <p className="text-muted-foreground">Here is what is happening in your workspace today.</p>
+        </div>
+
+        {/* Quick Actions */}
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">Quick Actions</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Link href="/record" className="group relative overflow-hidden bg-primary text-primary-foreground border-transparent rounded-xl p-5 hover:bg-primary/90 transition-all shadow-sm">
+              <div className="flex flex-col gap-3">
+                <PlayCircle className="w-6 h-6 text-primary-foreground/80 group-hover:scale-110 transition-transform" />
+                <div>
+                  <h3 className="font-semibold text-lg">Record a Session</h3>
+                  <p className="text-sm text-primary-foreground/80 mt-1">Start tracking activity in a voice channel immediately.</p>
                 </div>
-                <p className="text-[10px] font-mono text-muted-foreground mt-0.5">ID: {activeSession.id}</p>
               </div>
-              <span className="text-[10px] font-mono bg-status-online/10 text-status-online border border-status-online/20 px-1.5 py-0.5 rounded">ACTIVE</span>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: 'Participants', value: activeSession.participantCount },
-                { label: 'Messages', value: activeSession.totalMessages },
-                { label: 'Voice Min', value: activeSession.totalVoiceMinutes },
-                { label: 'Avg Score', value: activeSession.avgScore.toFixed(1) },
-                { label: 'Duration', value: '45m' },
-                { label: 'Guild', value: 'DevOps' },
-              ].map((item) => (
-                <div key={item.label} className="bg-muted/30 rounded p-2">
-                  <p className="text-[9px] font-mono text-muted-foreground uppercase">{item.label}</p>
-                  <p className="text-sm font-mono font-semibold mt-0.5">{item.value}</p>
+            </Link>
+
+            <Link href="/scheduled" className="group bg-card border border-border rounded-xl p-5 hover:border-primary/50 hover:shadow-sm transition-all">
+              <div className="flex flex-col gap-3">
+                <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                  <Calendar className="w-5 h-5 text-secondary-foreground group-hover:text-primary transition-colors" />
                 </div>
-              ))}
+                <div>
+                  <h3 className="font-semibold text-foreground">Schedule</h3>
+                  <p className="text-sm text-muted-foreground mt-1">Plan a session for later.</p>
+                </div>
+              </div>
+            </Link>
+
+            <Link href="/messages" className="group bg-card border border-border rounded-xl p-5 hover:border-primary/50 hover:shadow-sm transition-all">
+              <div className="flex flex-col gap-3">
+                <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                  <MessageSquare className="w-5 h-5 text-secondary-foreground group-hover:text-primary transition-colors" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">Send Message</h3>
+                  <p className="text-sm text-muted-foreground mt-1">Announce to a channel.</p>
+                </div>
+              </div>
+            </Link>
+
+            <Link href="/reports" className="group bg-card border border-border rounded-xl p-5 hover:border-primary/50 hover:shadow-sm transition-all">
+              <div className="flex flex-col gap-3">
+                <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                  <FileText className="w-5 h-5 text-secondary-foreground group-hover:text-primary transition-colors" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">View Reports</h3>
+                  <p className="text-sm text-muted-foreground mt-1">Review past sessions.</p>
+                </div>
+              </div>
+            </Link>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Content Area */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* Live Session Status */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Live Now</h2>
+              </div>
+              
+              {activeSession ? (
+                <div className="bg-card border border-status-online/30 rounded-xl p-6 shadow-sm relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-status-online"></div>
+                  <div className="flex items-start justify-between mb-6">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-online opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-status-online" />
+                        </span>
+                        <span className="text-xs font-semibold text-status-online uppercase tracking-wider">Recording in Progress</span>
+                      </div>
+                      <h3 className="text-xl font-semibold mt-1">#{activeSession.channelName}</h3>
+                      <p className="text-sm text-muted-foreground mt-1">Started by {activeSession.triggeredBy || 'Instructor'}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="bg-secondary/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Participants</p>
+                      <p className="text-lg font-semibold">{activeSession.participantCount}</p>
+                    </div>
+                    <div className="bg-secondary/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Duration</p>
+                      <p className="text-lg font-semibold">{activeSession.duration || 60} min limit</p>
+                    </div>
+                  </div>
+
+                  <Link href={`/reports/${activeSession.id}`} className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-secondary text-secondary-foreground hover:bg-secondary/80 h-10 px-4 py-2">
+                    Open Dashboard
+                  </Link>
+                </div>
+              ) : (
+                <div className="bg-card border border-border border-dashed rounded-xl p-8 text-center flex flex-col items-center justify-center shadow-sm">
+                  <Radio className="w-8 h-8 text-muted-foreground/30 mb-4" />
+                  <h3 className="text-base font-medium mb-1">No active sessions</h3>
+                  <p className="text-sm text-muted-foreground mb-4">You are not currently recording any channels.</p>
+                  <Link href="/record" className="text-sm text-primary hover:underline font-medium">
+                    Start a new recording
+                  </Link>
+                </div>
+              )}
             </div>
-            <div className="mt-3 pt-3 border-t border-border">
-              <Link
-                href={`/sessions/${activeSession.id}`}
-                className="text-[10px] font-mono text-primary hover:underline"
-              >
-                Open session detail →
-              </Link>
+
+            {/* Upcoming / Scheduled */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Coming Up</h2>
+                <Link href="/scheduled" className="text-sm text-primary hover:underline">View Calendar</Link>
+              </div>
+              <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                <div className="text-center py-6">
+                  <Calendar className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">No sessions scheduled for today.</p>
+                </div>
+              </div>
             </div>
+
           </div>
 
-          {/* Recent logs */}
-          <div className="bg-card border border-border rounded p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Recent Logs</p>
-              <Link href="/logs" className="text-[10px] font-mono text-primary hover:underline">
-                view all →
-              </Link>
+          {/* Right Sidebar Area */}
+          <div className="space-y-6">
+            
+            {/* Overview Stats */}
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">This Week</h2>
+              <div className="space-y-3">
+                <div className="bg-card border border-border rounded-xl p-4 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-chart-1/10 flex items-center justify-center">
+                      <Radio className="w-4 h-4 text-chart-1" />
+                    </div>
+                    <span className="text-sm font-medium">Sessions Hosted</span>
+                  </div>
+                  <span className="text-xl font-bold">{totalSessions}</span>
+                </div>
+                
+                <div className="bg-card border border-border rounded-xl p-4 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-chart-2/10 flex items-center justify-center">
+                      <Users className="w-4 h-4 text-chart-2" />
+                    </div>
+                    <span className="text-sm font-medium">Total Participants</span>
+                  </div>
+                  <span className="text-xl font-bold">{totalParticipants}</span>
+                </div>
+              </div>
             </div>
-            <div className="space-y-0.5">
-              {recentLogs.slice(0, 10).map((log) => (
-                <LogLine key={log.id} {...log} compact />
-              ))}
+
+            {/* Recent Activity */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Recent Activity</h2>
+                <Link href="/activity" className="text-sm text-primary hover:underline">View All</Link>
+              </div>
+              <div className="bg-card border border-border rounded-xl p-1 shadow-sm overflow-hidden">
+                 <div className="text-center py-8">
+                  <Activity className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">Activity feed will appear here.</p>
+                </div>
+              </div>
             </div>
+
           </div>
         </div>
       </div>
