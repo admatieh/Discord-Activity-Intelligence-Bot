@@ -1,23 +1,127 @@
 // utils/permissions.js
+
 const { INSTRUCTOR_ROLE_NAME } = require('../config/roles');
 
-/**
- * Check if a guild member has instructor or admin permissions.
- * @returns {{ allowed: boolean, message?: string }}
- */
-function checkInstructor(member) {
-    const hasRole = member.roles.cache.some(
-        (role) => role.name === INSTRUCTOR_ROLE_NAME
-    );
-    const isAdmin = member.permissions.has('Administrator');
+const INSTRUCTOR_ROLE_IDS = (process.env.INSTRUCTOR_ROLE_IDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
 
-    if (!hasRole && !isAdmin) {
-        return {
-            allowed: false,
-            message: `❌ You need the **${INSTRUCTOR_ROLE_NAME}** role or Administrator permission.`
-        };
-    }
-    return { allowed: true };
+const BOT_ADMIN_USER_IDS = (process.env.BOT_ADMIN_USER_IDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+function hasAnyRoleId(member, roleIds) {
+    if (!member?.roles?.cache || !roleIds.length) return false;
+
+    return roleIds.some((roleId) => member.roles.cache.has(roleId));
 }
 
-module.exports = { checkInstructor };
+function hasRoleName(member, roleName) {
+    if (!member?.roles?.cache || !roleName) return false;
+
+    return member.roles.cache.some((role) => role.name === roleName);
+}
+
+/**
+ * Check if a guild member can use instructor/admin commands.
+ * In this project, instructors are treated the same as admins for bot actions.
+ *
+ * @returns {{ allowed: boolean, reason?: string, message?: string, role?: string }}
+ */
+function checkInstructor(member) {
+    if (!member) {
+        return {
+            allowed: false,
+            reason: 'missing_member',
+            message: '❌ I could not verify your server role. Please run this command inside the Discord server.'
+        };
+    }
+
+    const userId = member.user?.id || member.id;
+
+    const isBotAdminUser = BOT_ADMIN_USER_IDS.includes(userId);
+    const isDiscordAdmin = member.permissions?.has?.('Administrator') === true;
+    const hasInstructorRoleId = hasAnyRoleId(member, INSTRUCTOR_ROLE_IDS);
+    const hasInstructorRoleName = hasRoleName(member, INSTRUCTOR_ROLE_NAME);
+
+    if (isBotAdminUser || isDiscordAdmin || hasInstructorRoleId || hasInstructorRoleName) {
+        return {
+            allowed: true,
+            role: isDiscordAdmin || isBotAdminUser ? 'admin' : 'instructor'
+        };
+    }
+
+    return {
+        allowed: false,
+        reason: 'missing_instructor_permission',
+        message:
+            `❌ You need the **${INSTRUCTOR_ROLE_NAME}** role or Administrator permission to use this command.`
+    };
+}
+
+/**
+ * Check if a guild member is a Bot Admin (Discord Admin or in BOT_ADMIN_USER_IDS).
+ *
+ * @returns {{ allowed: boolean, reason?: string, message?: string }}
+ */
+function checkBotAdmin(member) {
+    if (!member) {
+        return {
+            allowed: false,
+            reason: 'missing_member',
+            message: '❌ I could not verify your server role. Please run this command inside the Discord server.'
+        };
+    }
+
+    const userId = member.user?.id || member.id;
+    const isBotAdminUser = BOT_ADMIN_USER_IDS.includes(userId);
+    const isDiscordAdmin = member.permissions?.has?.('Administrator') === true;
+
+    if (isBotAdminUser || isDiscordAdmin) {
+        return { allowed: true, role: 'admin' };
+    }
+
+    return {
+        allowed: false,
+        reason: 'missing_admin_permission',
+        message: '❌ You must be a Discord Administrator or Bot Admin to use this command.'
+    };
+}
+
+/**
+ * Use this for student-safe/public commands.
+ */
+function checkPublic() {
+    return { allowed: true, role: 'public' };
+}
+
+/**
+ * Helper to resolve the configured Instructor role.
+ * 
+ * @param {import('discord.js').Guild} guild 
+ * @returns {import('discord.js').Role | null | string} Error string or Role object
+ */
+function getInstructorRole(guild) {
+    if (!guild || !guild.roles) return '❌ Guild not found or invalid.';
+
+    // Check by configured IDs first
+    for (const roleId of INSTRUCTOR_ROLE_IDS) {
+        const role = guild.roles.cache.get(roleId);
+        if (role) return role;
+    }
+
+    // Fallback to name
+    const roleByName = guild.roles.cache.find(r => r.name === INSTRUCTOR_ROLE_NAME);
+    if (roleByName) return roleByName;
+
+    return `❌ Instructor role not found. Please create a role named "${INSTRUCTOR_ROLE_NAME}" or set INSTRUCTOR_ROLE_IDS.`;
+}
+
+module.exports = {
+    checkInstructor,
+    checkBotAdmin,
+    checkPublic,
+    getInstructorRole
+};

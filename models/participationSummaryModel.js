@@ -65,6 +65,18 @@ function getByUser(sessionId, userId) {
 }
 
 /**
+ * Get top N participation summaries for a session.
+ */
+function getTop(sessionId, limit) {
+    try {
+        return db.prepare('SELECT * FROM participation_summary WHERE session_id = ? ORDER BY score DESC LIMIT ?').all(sessionId, limit);
+    } catch (error) {
+        logger.error(`participationSummaryModel.getTop error: ${error.message}`);
+        return [];
+    }
+}
+
+/**
  * Check if a session has already been finalized (scored).
  */
 function isSessionFinalized(sessionId) {
@@ -81,5 +93,6 @@ module.exports = {
     insertMany,
     getBySession,
     getByUser,
+    getTop,
     isSessionFinalized
 };

@@ -10,8 +10,7 @@ const activityEventModel = require('../../modules/activity/activityEventModel');
 const { resolveSessionContext, resolveUserContext } = require('../../utils/commandResolver');
 const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
-
-const MAX_ROWS = 15;
+const { COMMAND_LIMITS } = require('../../config/constants');
 
 module.exports = {
     name: 'interactions-user',
@@ -33,7 +32,7 @@ module.exports = {
 
             const options = parsed?.options || {};
             const ctx     = resolveSessionContext(message, options);
-            const userCtx = resolveUserContext(options);
+            const userCtx = resolveUserContext(message, options);
 
             if (ctx.error)     return message.reply(ctx.error);
             if (userCtx.error) return message.reply(userCtx.error);
@@ -45,8 +44,9 @@ module.exports = {
                 return message.reply(`⚠️ No interaction events found for <@${userCtx.userId}> in Session #${ctx.sessionId}.`);
             }
 
-            const rows      = userEvents.slice(0, MAX_ROWS);
-            const truncated = userEvents.length > MAX_ROWS;
+            const limit     = COMMAND_LIMITS.DEFAULT;
+            const rows      = userEvents.slice(0, limit);
+            const truncated = userEvents.length > limit;
 
             // Count by type
             const counts = {};
@@ -71,7 +71,7 @@ module.exports = {
             let output = `💬 **Interactions — <@${userCtx.userId}> / Session #${ctx.sessionId}** (${userEvents.length} events)\n`;
             output    += `_${countSummary}_\n`;
             output    += `\`\`\`\n${header}\n${divider}\n${lines.join('\n')}\n\`\`\``;
-            if (truncated) output += `\n_Showing ${MAX_ROWS} of ${userEvents.length} events._`;
+            if (truncated) output += `\n_Showing ${limit} of ${userEvents.length} interaction events._`;
 
             return message.reply(output);
         } catch (error) {

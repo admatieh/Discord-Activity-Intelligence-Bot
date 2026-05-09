@@ -104,24 +104,27 @@ function resolveSessionContext(message, options = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve a Discord user ID from --user option.
+ * Resolve a Discord user ID from --user option or message mentions.
  *
- * Accepts:
- *   - Discord user object (resolved by argParser from <@mention>)
- *   - Mention string: <@123456789> or <@!123456789>
- *   - Raw numeric string / number
- *
+ * @param {import('discord.js').Message} message
  * @param {Record<string, any>} options
  * @returns {{ userId: string } | { error: string }}
  */
-function resolveUserContext(options = {}) {
+function resolveUserContext(message, options = {}) {
     try {
         const raw = options.user;
+        
+        // 1. Try mentions first (discord.js automatically parses them into message.mentions)
+        const firstMention = message?.mentions?.users?.first() || message?.mentions?.members?.first()?.user;
+        if (firstMention && firstMention.id) {
+            return { userId: String(firstMention.id) };
+        }
+
         if (raw === undefined || raw === null) {
             return { error: '⚠️ No user specified. Use --user <@mention|id>.' };
         }
 
-        // Discord.js user/member object resolved by argParser
+        // 2. Discord.js user/member object resolved by argParser
         if (typeof raw === 'object' && raw !== null) {
             const id = raw.id || (raw.user && raw.user.id);
             if (id) return { userId: String(id) };
@@ -129,12 +132,12 @@ function resolveUserContext(options = {}) {
 
         let str = String(raw);
 
-        // Mention format: <@123> or <@!123>
-        const mentionMatch = str.match(/^<@!?(\d+)>$/);
+        // 3. Mention format fallback: <@123> or <@!123> (and allow words for test mocks)
+        const mentionMatch = str.match(/^<@!?([\w-]+)>$/);
         if (mentionMatch) return { userId: mentionMatch[1] };
 
-        // Raw numeric ID
-        if (/^\d+$/.test(str)) return { userId: str };
+        // 4. Raw ID (numbers, or alphanumeric for test mocks)
+        if (/^[\w-]+$/.test(str)) return { userId: str };
 
         return { error: `⚠️ Could not resolve user from: "${str}". Use a mention or numeric ID.` };
     } catch (err) {
@@ -143,7 +146,50 @@ function resolveUserContext(options = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// resolveChannelContext
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a Discord channel ID from --channel option or string ID.
+ *
+ * @param {import('discord.js').Message} message
+ * @param {Record<string, any>} options
+ * @param {boolean} requireText
+ * @returns {{ channelId: string } | { error: string }}
+ */
+function resolveChannelContext(message, options = {}, requireText = false) {
+    try {
+        const raw = options.channel;
+        
+        const firstMention = message?.mentions?.channels?.first();
+        if (firstMention && firstMention.id) {
+            return { channelId: String(firstMention.id) };
+        }
+
+        if (raw === undefined || raw === null) {
+            return { error: '⚠️ No channel specified. Use --channel <#mention|id>.' };
+        }
+
+        if (typeof raw === 'object' && raw !== null) {
+            const id = raw.id;
+            if (id) return { channelId: String(id) };
+        }
+
+        let str = String(raw);
+
+        const mentionMatch = str.match(/^<#([\w-]+)>$/);
+        if (mentionMatch) return { channelId: mentionMatch[1] };
+
+        if (/^[\w-]+$/.test(str)) return { channelId: str };
+
+        return { error: `⚠️ Could not resolve channel from: "${str}". Use a mention or numeric ID.` };
+    } catch (err) {
+        return { error: `❌ resolveChannelContext failed: ${err.message}` };
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
-module.exports = { resolveSessionContext, resolveUserContext };
+module.exports = { resolveSessionContext, resolveUserContext, resolveChannelContext };

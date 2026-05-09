@@ -24,6 +24,14 @@ const STALE_RUNNING_THRESHOLD_MS = 300_000; // 5 minutes — stale "running" job
 // DB helpers
 // ---------------------------------------------------------------------------
 
+function toSqlValue(value) {
+    if (value === undefined) return null;
+    if (value === null) return null;
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'object') return JSON.stringify(value);
+    return value;
+}
+
 function getScheduledItem(id) {
     try {
         return db.prepare('SELECT * FROM scheduled_items WHERE id = ?').get(id) || null;
@@ -280,6 +288,10 @@ function scheduleSession(input) {
     try {
         const { guildId, voiceChannelId, textChannelId, title, scheduledFor, durationMinutes, createdBy, payload } = input;
 
+        if (typeof guildId === 'object' && guildId !== null) return { ok: false, error: 'guildId must be a string ID' };
+        if (typeof voiceChannelId === 'object' && voiceChannelId !== null) return { ok: false, error: 'voiceChannelId must be a string ID' };
+        if (textChannelId && typeof textChannelId === 'object') return { ok: false, error: 'textChannelId must be a string ID' };
+
         if (!guildId) return { ok: false, error: 'guildId is required' };
         if (!voiceChannelId) return { ok: false, error: 'voiceChannelId is required' };
         if (!scheduledFor) return { ok: false, error: 'scheduledFor is required' };
@@ -292,21 +304,27 @@ function scheduleSession(input) {
             return { ok: false, error: 'Scheduled time must be in the future' };
         }
 
-        const payloadJson = JSON.stringify(payload || {});
+        const safeGuildId = String(guildId);
+        const safeVoiceChannelId = String(voiceChannelId);
+        const safeTextChannelId = textChannelId ? String(textChannelId) : null;
+        const safeTitle = title ? String(title) : null;
+        const safeCreatedBy = createdBy ? String(createdBy) : 'dashboard';
+
+        const payloadJson = toSqlValue(payload || {});
         const result = db.prepare(`
             INSERT INTO scheduled_items
                 (type, title, guild_id, voice_channel_id, text_channel_id, scheduled_for,
                  duration_minutes, payload_json, status, created_by, created_at)
             VALUES ('session', ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, datetime('now'))
         `).run(
-            title || null,
-            guildId,
-            voiceChannelId,
-            textChannelId || null,
+            safeTitle,
+            safeGuildId,
+            safeVoiceChannelId,
+            safeTextChannelId,
             scheduledForDate.toISOString(),
-            durationMinutes || 60,
+            Number(durationMinutes) || 60,
             payloadJson,
-            createdBy || 'dashboard'
+            safeCreatedBy
         );
 
         const id = Number(result.lastInsertRowid);

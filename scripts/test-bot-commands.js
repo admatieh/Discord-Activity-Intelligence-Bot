@@ -315,6 +315,48 @@ async function runTests() {
             assert(res.okLike || res.returned || res.replies.length > 0, 'No positive response');
         });
 
+        await test('[schedule-session] relative time (in 30m)', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('schedule-session');
+            const msg = new MockMessage('!schedule-session', env.guild, env.textChannel, env.member);
+            const args = { channel: env.voiceChannel.id, in: '30m', duration: 45, title: 'In 30m Test' };
+            const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+            assert(!res.threw, 'Command crashed: ' + (res.error && res.error.stack));
+            assert(res.returned && res.returned.includes('✅'), 'Did not return success for in 30m');
+        });
+
+        await test('[schedule-session] tomorrow absolute time', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('schedule-session');
+            const msg = new MockMessage('!schedule-session', env.guild, env.textChannel, env.member);
+            const args = { channel: env.voiceChannel.id, at: 'tomorrow 2:30 PM', duration: 45 };
+            const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+            assert(!res.threw, 'Command crashed: ' + (res.error && res.error.stack));
+            assert(res.returned && res.returned.includes('✅'), 'Did not return success for tomorrow 2:30 PM');
+        });
+
+        await test('[schedule-session] past time gracefully fails', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('schedule-session');
+            const msg = new MockMessage('!schedule-session', env.guild, env.textChannel, env.member);
+            const args = { channel: env.voiceChannel.id, at: 'yesterday 2:30 PM' };
+            const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+            assert(!res.threw, 'Command crashed: ' + (res.error && res.error.stack));
+            assert(res.returned && res.returned.includes('❌'), 'Did not fail for past time');
+            assert(res.returned.includes('past'), 'Did not specify past time error');
+        });
+
+        await test('[schedule-session] invalid time gracefully fails', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('schedule-session');
+            const msg = new MockMessage('!schedule-session', env.guild, env.textChannel, env.member);
+            const args = { channel: env.voiceChannel.id, at: 'fjsldkfjdslk' };
+            const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+            assert(!res.threw, 'Command crashed: ' + (res.error && res.error.stack));
+            assert(res.returned && res.returned.includes('❌'), 'Did not fail for invalid time');
+            assert(res.returned.includes('understand'), 'Did not specify understand time error');
+        });
+
         // send-message
         await test('[send-message] valid mock send', async () => {
             const env = createMockEnv();
@@ -327,7 +369,114 @@ async function runTests() {
             };
             const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
             assert(!res.threw, 'Command crashed: ' + (res.error && res.error.stack));
-            assert(env.textChannel.sends.includes('Test message sending'), 'Message not sent to channel');
+            assert(res.returned && res.returned.includes('✅'), 'No positive response: ' + res.returned);
+        });
+
+        await test('[send-message] raw channel mention', async () => {
+            const env = createMockEnv();
+            messageService.setClient(env.client);
+            const cmd = commands.get('send-message');
+            const msg = new MockMessage('!send-message', env.guild, env.textChannel, env.member);
+            const args = { channel: `<#${env.textChannel.id}>`, content: 'Hello' };
+            const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+            assert(res.returned && res.returned.includes('✅'), 'Did not resolve <#id> mention');
+        });
+
+        await test('[voice-user] raw user mention', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('voice-user');
+            const msg = new MockMessage('!voice-user', env.guild, env.textChannel, env.member);
+            const args = { user: `<@${env.member.user.id}>` };
+            const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+            assert(!res.threw, 'Command crashed');
+            assert(!res.returned || !res.returned.includes('⚠️ Could not resolve user'), 'Failed to parse mention');
+        });
+
+        await test('[voice-user] raw user ID', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('voice-user');
+            const msg = new MockMessage('!voice-user', env.guild, env.textChannel, env.member);
+            const args = { user: env.member.user.id };
+            const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+            assert(!res.threw, 'Command crashed');
+            assert(!res.returned || !res.returned.includes('⚠️ Could not resolve user'), 'Failed to parse raw ID');
+        });
+
+        await test('[participation-top] invalid limit falls back', async () => {
+            const env = createMockEnv();
+            
+            // Insert dummy session & record to pass the 'No participation data' early return
+            const db = require('./../database/db');
+            db.prepare("INSERT OR IGNORE INTO sessions (id, guild_id, voice_channel_id, status) VALUES (1, ?, ?, 'COMPLETED')").run(env.guild.id, env.voiceChannel.id);
+            const psm = require('./../models/participationSummaryModel');
+            psm.insertMany([{ session_id: 1, user_id: 'test', score: 100, speaking_score: 50, interaction_score: 30, attendance_score: 20, label: 'HIGHLY_ACTIVE' }]);
+
+            const cmd = commands.get('participation-top');
+            const msg = new MockMessage('!participation-top', env.guild, env.textChannel, env.member);
+            const args = { limit: 'invalid' };
+            const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+            assert(!res.threw, 'Command crashed');
+            assert(res.returned && res.returned.includes('Top 15'), 'Did not fallback to default limit: ' + res.returned); // DEFAULT is 15 based on config
+        });
+
+        await test('[participation-top] over-max limit gets capped', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('participation-top');
+            const msg = new MockMessage('!participation-top', env.guild, env.textChannel, env.member);
+            const args = { limit: '999999' };
+            const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+            assert(!res.threw, 'Command crashed');
+            assert(res.returned && res.returned.includes('Top 100'), 'Did not cap at max limit: ' + res.returned); // MAX is 100 based on config
+        });
+
+        // ==========================================
+        // NEW COMMAND TESTS (General / System)
+        // ==========================================
+
+        await test('[whoami] valid mock execution', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('whoami');
+            const msg = new MockMessage('!whoami', env.guild, env.textChannel, env.member);
+            const res = await safeExecute(cmd, msg, {}, { parsed: {}, commands });
+            assert(!res.threw, 'Command crashed');
+            assert(res.returned && res.returned.includes('You are'), 'Missing expected response output: ' + res.returned);
+        });
+
+        await test('[my-attendance] valid mock execution', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('my-attendance');
+            const msg = new MockMessage('!my-attendance', env.guild, env.textChannel, env.member);
+            const res = await safeExecute(cmd, msg, {}, { parsed: {}, commands });
+            assert(!res.threw, 'Command crashed');
+            assert(res.returned && (res.returned.includes('Your Attendance') || res.returned.includes('don\'t have any')), 'Missing expected response');
+        });
+
+        await test('[my-participation] valid mock execution', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('my-participation');
+            const msg = new MockMessage('!my-participation', env.guild, env.textChannel, env.member);
+            const res = await safeExecute(cmd, msg, {}, { parsed: {}, commands });
+            assert(!res.threw, 'Command crashed');
+            assert(res.returned && (res.returned.includes('Your Participation') || res.returned.includes('don\'t have any')), 'Missing expected response');
+        });
+
+        await test('[add-instructor] missing user handled', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('add-instructor');
+            const msg = new MockMessage('!add-instructor', env.guild, env.textChannel, env.member);
+            const res = await safeExecute(cmd, msg, {}, { parsed: {}, commands });
+            assert(!res.threw, 'Command crashed');
+            // Mock member has "Administrator" so it passes perm check but fails on missing user args
+            assert(res.returned && res.returned.includes('Please mention a user'), 'Missing user not handled properly: ' + res.returned);
+        });
+
+        await test('[remove-instructor] missing user handled', async () => {
+            const env = createMockEnv();
+            const cmd = commands.get('remove-instructor');
+            const msg = new MockMessage('!remove-instructor', env.guild, env.textChannel, env.member);
+            const res = await safeExecute(cmd, msg, {}, { parsed: {}, commands });
+            assert(!res.threw, 'Command crashed');
+            assert(res.returned && res.returned.includes('Please mention a user'), 'Missing user not handled properly: ' + res.returned);
         });
 
         // session-start

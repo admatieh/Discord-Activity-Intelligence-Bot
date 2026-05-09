@@ -10,9 +10,7 @@ const participationSummaryModel = require('../../models/participationSummaryMode
 const { resolveSessionContext } = require('../../utils/commandResolver');
 const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
-
-const DEFAULT_LIMIT = 5;
-const MAX_LIMIT     = 15;
+const { COMMAND_LIMITS } = require('../../config/constants');
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 
@@ -21,10 +19,10 @@ module.exports = {
     description: 'Show top N participants by score for a session.',
     usage: '!participation-top [--id <n>] [--channel <#ch>] [--latest] [--limit <n>]',
     options: [
-        { name: 'id',      type: 'number',  required: false, description: 'Session ID' },
+        { name: 'id', type: 'number', required: false, description: 'Session ID' },
         { name: 'channel', type: 'channel', required: false, description: 'Voice channel' },
-        { name: 'latest',  type: 'boolean', required: false, description: 'Use most recent session' },
-        { name: 'limit',   type: 'number',  required: false, description: `Number of results (default: ${DEFAULT_LIMIT}, max: ${MAX_LIMIT})` }
+        { name: 'latest', type: 'boolean', required: false, description: 'Use most recent session' },
+        { name: 'limit', type: 'number', required: false, description: `Number of results (default: ${COMMAND_LIMITS.DEFAULT}, max: ${COMMAND_LIMITS.MAX})` }
     ],
 
     execute(message, _args, { parsed } = {}) {
@@ -35,16 +33,16 @@ module.exports = {
             if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
-            const ctx     = resolveSessionContext(message, options);
+            const ctx = resolveSessionContext(message, options);
 
             if (ctx.error) return message.reply(ctx.error);
 
-            const rawLimit = options.limit !== undefined ? Number(options.limit) : DEFAULT_LIMIT;
-            const limit    = isNaN(rawLimit) || rawLimit < 1
-                ? DEFAULT_LIMIT
-                : Math.min(rawLimit, MAX_LIMIT);
+            const rawLimit = parsed?.options?.limit;
+            const limit = isNaN(rawLimit) || rawLimit < COMMAND_LIMITS.MIN
+                ? COMMAND_LIMITS.DEFAULT
+                : Math.min(rawLimit, COMMAND_LIMITS.MAX);
 
-            const records = participationSummaryModel.getBySession(ctx.sessionId);
+            const records = participationSummaryModel.getTop(ctx.sessionId, limit);
 
             if (!records || records.length === 0) {
                 return message.reply(`⚠️ No participation data for Session #${ctx.sessionId}. Session may not be finalized.`);
@@ -59,7 +57,7 @@ module.exports = {
             });
 
             let output = `🏆 **Top ${limit} — Session #${ctx.sessionId} Participation** (${records.length} total)\n`;
-            output    += lines.join('\n');
+            output += lines.join('\n');
 
             return message.reply(output);
         } catch (error) {

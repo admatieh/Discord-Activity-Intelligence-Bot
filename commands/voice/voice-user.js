@@ -10,8 +10,7 @@ const voiceActivityModel = require('../../models/voiceActivityModel');
 const { resolveSessionContext, resolveUserContext } = require('../../utils/commandResolver');
 const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
-
-const MAX_ROWS = 15;
+const { COMMAND_LIMITS } = require('../../config/constants');
 
 module.exports = {
     name: 'voice-user',
@@ -33,7 +32,7 @@ module.exports = {
 
             const options = parsed?.options || {};
             const ctx     = resolveSessionContext(message, options);
-            const userCtx = resolveUserContext(options);
+            const userCtx = resolveUserContext(message, options);
 
             if (ctx.error)     return message.reply(ctx.error);
             if (userCtx.error) return message.reply(userCtx.error);
@@ -44,8 +43,9 @@ module.exports = {
                 return message.reply(`⚠️ No voice intervals found for <@${userCtx.userId}> in Session #${ctx.sessionId}.`);
             }
 
-            const rows      = intervals.slice(0, MAX_ROWS);
-            const truncated = intervals.length > MAX_ROWS;
+            const limit     = COMMAND_LIMITS.DEFAULT;
+            const rows      = intervals.slice(0, limit);
+            const truncated = intervals.length > limit;
 
             let totalSec = 0;
             const lines = rows.map((iv, i) => {
@@ -62,7 +62,7 @@ module.exports = {
             let output = `🎙️ **Voice Intervals — <@${userCtx.userId}> / Session #${ctx.sessionId}** (${intervals.length} segments)\n`;
             output    += `Total speaking: **${Math.round(totalSec / 60)} min ${totalSec % 60}s**\n`;
             output    += `\`\`\`\n${lines.join('\n')}\n\`\`\``;
-            if (truncated) output += `\n_Showing ${MAX_ROWS} of ${intervals.length} intervals._`;
+            if (truncated) output += `\n_Showing ${limit} of ${intervals.length} intervals._`;
 
             return message.reply(output);
         } catch (error) {

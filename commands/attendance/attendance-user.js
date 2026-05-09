@@ -10,8 +10,7 @@ const attendanceSummaryModel = require('../../models/attendanceSummaryModel');
 const { resolveUserContext } = require('../../utils/commandResolver');
 const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
-
-const MAX_ROWS = 15;
+const { COMMAND_LIMITS } = require('../../config/constants');
 
 const STATUS_EMOJI = {
     ON_TIME:    '✅',
@@ -36,7 +35,7 @@ module.exports = {
             if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
-            const userCtx = resolveUserContext(options);
+            const userCtx = resolveUserContext(message, options);
 
             if (userCtx.error) return message.reply(userCtx.error);
 
@@ -46,8 +45,9 @@ module.exports = {
                 return message.reply(`⚠️ No attendance records found for <@${userCtx.userId}>.`);
             }
 
-            const rows     = records.slice(0, MAX_ROWS);
-            const truncated = records.length > MAX_ROWS;
+            const limit     = COMMAND_LIMITS.DEFAULT;
+            const rows      = records.slice(0, limit);
+            const truncated = records.length > limit;
 
             const COL_SID    = 6;
             const COL_STATUS = 11;
@@ -67,7 +67,7 @@ module.exports = {
 
             let output = `📋 **Attendance History — <@${userCtx.userId}>** (${records.length} sessions)\n`;
             output    += `\`\`\`\n${header}\n${divider}\n${lines.join('\n')}\n\`\`\``;
-            if (truncated) output += `\n_Showing ${MAX_ROWS} of ${records.length} records (most recent first)._`;
+            if (truncated) output += `\n_Showing ${limit} of ${records.length} records (most recent first)._`;
 
             return message.reply(output);
         } catch (error) {

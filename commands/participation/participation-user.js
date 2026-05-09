@@ -39,7 +39,7 @@ module.exports = {
 
             const options = parsed?.options || {};
             const ctx     = resolveSessionContext(message, options);
-            const userCtx = resolveUserContext(options);
+            const userCtx = resolveUserContext(message, options);
 
             if (ctx.error)     return message.reply(ctx.error);
             if (userCtx.error) return message.reply(userCtx.error);

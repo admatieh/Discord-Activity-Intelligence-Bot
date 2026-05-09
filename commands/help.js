@@ -23,20 +23,28 @@ module.exports = {
         { name: 'category', type: 'string', required: false, description: 'Filter commands by category (e.g., session, participation)' },
         { name: 'command',  type: 'string', required: false, description: 'Command name to get detailed help for' }
     ],
-    execute(message, _args, { commands, parsed } = {}) {
+    async execute(message, _args, { commands, parsed } = {}) {
         try {
             if (!commands) {
                 return message.reply('❌ Help system unavailable.');
             }
 
+            const { checkInstructor } = require('../utils/permissions');
+            const perm = checkInstructor(message.member);
+            const isInstructor = perm.allowed;
+
             const options = parsed?.options || {};
             const targetCommand = options.command || (parsed?.positional?.[0]);
             const targetCategory = options.category;
 
-            // Extract unique primary commands (filter out alias entries pointing to the same command obj)
+            // Extract unique primary commands
             const uniqueCommands = new Set();
             for (const [key, cmd] of commands.entries()) {
                 if (key === cmd.name.toLowerCase()) {
+                    // Filter out commands that require instructor perms if user is public
+                    if (!isInstructor && cmd.requiredPermission !== 'public') {
+                        continue;
+                    }
                     uniqueCommands.add(cmd);
                 }
             }
@@ -44,12 +52,8 @@ module.exports = {
             // 1. Detailed help for a specific command
             if (targetCommand) {
                 const cmd = commands.get(targetCommand.toLowerCase());
-                if (!cmd) {
+                if (!cmd || (!isInstructor && cmd.requiredPermission !== 'public')) {
                     return message.reply(`❌ Command not found: \`${targetCommand}\`.`);
-                }
-                if (cmd.hidden && !options.command) {
-                     // Minor protection: don't reveal hidden commands via positional unless they query it directly
-                     // Actually, if they queried it by name, they know it exists. So just show it.
                 }
                 return message.reply(formatCommandDetail(cmd));
             }
@@ -94,16 +98,38 @@ module.exports = {
                 
                 const showCmds = cmds.slice(0, MAX_PER_CATEGORY);
                 for (const cmd of showCmds) {
-                    lines.push(`- \`${cmd.name}\``);
+                    lines.push(`- \`${cmd.name}\` — ${cmd.description || 'No description.'}`);
                 }
 
                 if (cmds.length > MAX_PER_CATEGORY) {
-                    lines.push(`_... +${cmds.length - MAX_PER_CATEGORY} more commands. Use \`!help --category ${cat}\` to see all._`);
+                    lines.push(`_... +${cmds.length - MAX_PER_CATEGORY} more. Use \`!help --category ${cat}\` to see all._`);
                 }
                 lines.push(''); // blank line
             }
 
-            return message.reply(lines.join('\n').trim());
+            const fullText = lines.join('\n').trim();
+            
+            if (fullText.length <= 1900) {
+                return await message.reply(fullText);
+            }
+
+            const chunks = [];
+            let currentChunk = '';
+            for (const line of lines) {
+                if (currentChunk.length + line.length + 1 > 1900) {
+                    chunks.push(currentChunk);
+                    currentChunk = line;
+                } else {
+                    currentChunk += (currentChunk ? '\n' : '') + line;
+                }
+            }
+            if (currentChunk) chunks.push(currentChunk);
+
+            await message.reply(chunks[0]);
+            for (let i = 1; i < chunks.length; i++) {
+                await message.channel.send(chunks[i]);
+            }
+            return true;
         } catch (error) {
             logger.error(`Help command error: ${error.message}`, { error: error.message });
             return message.reply('❌ An error occurred while displaying help.');

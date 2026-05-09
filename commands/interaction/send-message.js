@@ -2,6 +2,7 @@
 // Usage: !send-message --channel <textChannelId> --content "Your message here"
 
 const messageService = require('../../services/messageService');
+const { resolveChannelContext } = require('../../utils/commandResolver');
 
 module.exports = {
     name: 'send-message',
@@ -18,11 +19,14 @@ module.exports = {
     ],
 
     async execute(message, args, context) {
-        const textChannelId = args.channel;
+        const parsed = context?.parsed || { options: args };
+        const channelCtx = resolveChannelContext(message, parsed.options, true);
+        if (channelCtx.error) return channelCtx.error;
+
+        const textChannelId = channelCtx.channelId;
         const content = args.content;
         const guildId = context?.guild?.id || message?.guild?.id;
 
-        if (!textChannelId) return '❌ --channel is required.';
         if (!content) return '❌ --content is required.';
 
         const result = await messageService.sendMessageNow({
