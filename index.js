@@ -5,6 +5,9 @@ const path = require('path');
 const { startApiServer } = require('./core/apiServer');
 const db = require('./database/db');
 const logger = require('./utils/logger');
+const { initScheduler, stopScheduler } = require('./services/schedulerService');
+const messageService = require('./services/messageService');
+const sessionActionService = require('./services/sessionActionService');
 
 const client = new Client({
     intents: [
@@ -30,31 +33,71 @@ for (const file of eventFiles) {
     }
 }
 
-// Start internal API server for Dashboard execution bridge
+// Start internal API server
 const apiServer = startApiServer(client);
 
-client.login(process.env.TOKEN);
+// When bot is ready: wire services + start scheduler
+client.once('ready', () => {
+    logger.log(`[SYSTEM] Bot ready as ${client.user.tag}`);
+
+    // Wire Discord client into services
+    messageService.setClient(client);
+    sessionActionService.setClient(client);
+
+    // Start scheduler (will execute due jobs on startup too)
+    initScheduler(client);
+
+    logger.log('[SYSTEM] All services initialized.');
+});
+
+// Retry login with backoff — Discord gateway sometimes returns 503 briefly
+async function loginWithRetry(retries = 5, delayMs = 15000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            await client.login(process.env.TOKEN);
+            return; // success
+        } catch (err) {
+            const isRetryable = err.status === 503 || err.status === 429 || err.code === 'ECONNRESET';
+            console.error(`[LOGIN] Attempt ${attempt}/${retries} failed: ${err.message}`);
+            if (attempt < retries && isRetryable) {
+                console.log(`[LOGIN] Retrying in ${delayMs / 1000}s...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            } else {
+                console.error('[LOGIN] Could not connect to Discord. Check your TOKEN and internet connection.');
+                // Keep API server alive even if Discord is down
+            }
+        }
+    }
+}
+
+loginWithRetry();
+
 
 process.on('uncaughtException', (err) => {
     console.error('UNCAUGHT EXCEPTION:', err);
 });
 
 process.on('unhandledRejection', (err) => {
+    // Don't crash on Discord gateway 503 — loginWithRetry handles those
+    if (err && (err.status === 503 || err.status === 429)) {
+        console.error(`[DISCORD] Gateway error (${err.status}) — retry logic will handle this.`);
+        return;
+    }
     console.error('UNHANDLED REJECTION:', err);
 });
 
-// Graceful shutdown handling
+
 function shutdown(signal) {
     logger.log(`\n[SYSTEM] Received ${signal}, initiating graceful shutdown...`);
-    
-    // Close HTTP Server
+
+    stopScheduler();
+
     if (apiServer) {
         apiServer.close(() => {
             logger.log('[API] Internal server closed.');
         });
     }
 
-    // Close Database Handles safely
     try {
         db.close();
         logger.log('[DATABASE] SQLite connection closed.');
@@ -62,7 +105,6 @@ function shutdown(signal) {
         logger.error(`[DATABASE] Error closing SQLite: ${err.message}`);
     }
 
-    // Destroy Discord Client
     if (client) {
         client.destroy();
         logger.log('[DISCORD] Client destroyed.');
@@ -75,4 +117,4 @@ function shutdown(signal) {
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

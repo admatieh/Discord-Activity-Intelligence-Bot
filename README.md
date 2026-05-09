@@ -1,29 +1,32 @@
 # Discord Activity Intelligence Bot + Dashboard
 
-A full-stack instructor control center for monitoring Discord study/work sessions. The bot tracks voice attendance, text activity, reactions, and participation. The Next.js dashboard provides a real-time control panel with guided actions, logs, session management, and a command terminal.
+A full-stack instructor control center for monitoring Discord study/work sessions. The bot tracks voice attendance, text activity, reactions, and participation. The Next.js dashboard provides a real-time instructor workspace with session recording, scheduling, messaging, reports, activity feed, and a command terminal.
 
 ---
 
 ## Architecture
 
 ```
-Discord Bot (runtime authority)          Next.js Dashboard (operator console)
-─────────────────────────────           ──────────────────────────────────────
-• Discord client                         • /control  — session start/end/manage
-• Voice/text event tracking              • /sessions — session list + history
-• Session lifecycle + timers             • /users    — tracked user analytics
-• Attendance + participation             • /logs     — real-time log viewer
-• SQLite writes                          • /terminal — command execution
-• HTTP API server (:4000)                • /commands — bot command registry
+Discord Bot (runtime authority)          Next.js Dashboard (instructor workspace)
+─────────────────────────────           ──────────────────────────────────────────
+• Discord client                         • Home         — overview + quick actions
+• Voice/text event tracking              • Record       — session start/end
+• Session lifecycle + timers             • Scheduled    — upcoming sessions/messages
+• Attendance + participation             • Messages     — send/schedule messages
+• Scheduler (polls every 20s)            • Reports      — real session reports
+• Message delivery                       • Participants — voice member tracking
+• Report generation                      • Activity     — real activity feed
+• SQLite writes via services             • Advanced     — command terminal
+• HTTP API server (:4000)
                         ↕ Bot API (x-api-key)
-                  Shared SQLite DB (data.db)
+              DATABASE_PATH → shared SQLite (data.db)
 ```
 
 **Data flow:**
-1. Dashboard UI → Next.js API route
+1. Dashboard UI → Next.js API route (proxy)
 2. Next.js API route → Bot HTTP API (port 4000)
-3. Bot executes action → writes to SQLite
-4. Dashboard reads SQLite (readonly) for analytics/history
+3. Bot executes action → writes to SQLite + Discord
+4. Dashboard reads activity/logs/reports via bot API
 
 ---
 
@@ -31,15 +34,15 @@ Discord Bot (runtime authority)          Next.js Dashboard (operator console)
 
 ### 1. Configure environment
 
-Bot `.env`:
+**Bot `.env`** (project root):
 ```
+TOKEN=your_discord_bot_token_here
 BOT_API_PORT=4000
 BOT_API_KEY=local_dashboard_key_123
 DATABASE_PATH=C:/Users/ADAM/Desktop/Discord-Activity-Intelligence-Bot/data.db
-DISCORD_TOKEN=your_token_here
 ```
 
-Dashboard `dashboard/.env.local`:
+**Dashboard `dashboard/.env.local`**:
 ```
 BOT_API_URL=http://127.0.0.1:4000/api
 BOT_API_KEY=local_dashboard_key_123
@@ -47,198 +50,235 @@ DATABASE_PATH=C:/Users/ADAM/Desktop/Discord-Activity-Intelligence-Bot/data.db
 NEXT_PUBLIC_API_BASE=/api
 ```
 
+> ⚠️ Both must use the **same** `DATABASE_PATH`. The bot logs the actual path on startup.
+
 ### 2. Start the bot
 ```bash
-# From project root
 node index.js
 ```
-Bot starts on port 4000. You'll see:
+You'll see:
 ```
+[DATABASE] Using DB path: C:/Users/ADAM/Desktop/Discord-Activity-Intelligence-Bot/data.db
+[DATABASE] Schema ready. All tables initialized.
 [API] Internal server running on http://127.0.0.1:4000
+[SYSTEM] Bot ready as YourBot#1234
+[Scheduler] Initialized. Polling every 20s.
 ```
 
 ### 3. Start the dashboard
 ```bash
 cd dashboard
 npm run dev
-# or: pnpm dev
 ```
 Dashboard runs on http://localhost:3000
 
 ---
 
-## Demo Walkthrough
+## Database Schema
 
-### Step 1: Open dashboard
-Navigate to http://localhost:3000. You'll see:
-- Overview page with DB stats (sessions, logs, users)
-- System status banner shows DB connected
+The shared `data.db` contains:
 
-### Step 2: Go to Session Control
-Navigate to `/control`. You'll see:
-- **Bot API Online** banner (green) if bot is running
-- **Bot API Offline** banner (red) with instructions if not
+| Table | Purpose |
+|---|---|
+| `sessions` | Recording sessions (title, guild, channels, status) |
+| `attendees` | Session attendee mapping |
+| `voice_events` | Raw join/leave events per session |
+| `voice_activity_intervals` | Speaking intervals |
+| `attendance_summary` | Finalized attendance per session |
+| `participation_summary` | Participation scores |
+| `users` | Discord user cache |
+| `logs` | Bot system logs (enhanced columns) |
+| `activity_events` | Human-readable activity events |
+| `scheduled_items` | Future sessions + messages |
+| `message_deliveries` | Message send history |
+| `session_reports` | Generated report JSON |
 
-### Step 3: Select a server
-- The guild dropdown auto-loads from the bot's Discord client cache
-- If the bot is in one server, it auto-selects
-
-### Step 4: Select a voice channel
-- Voice channel dropdown loads after server is selected
-- Shows member count for each channel
-- Shows live members in selected channel (name + count)
-
-### Step 5: Start a session
-- Select duration (25 / 45 / 60 / 90 min or Custom)
-- Optionally select a Report Channel (text channel for announcements)
-- Click **Start Session**
-- Result shows: session ID, channel, duration, initial participants
-
-### Step 6: View active session card
-- Active session appears immediately in the right panel
-- Shows live countdown timer
-- Shows started-by, duration, channel
-
-### Step 7: Check Quick Actions (below the form)
-8 guided action cards:
-- **Health Check** — ping bot runtime + Discord state
-- **List Active Sessions** — shows all running sessions
-- **Check Database** — table count, row counts
-- **Check Permissions** — verifies bot Discord perms
-- **Sync Voice Members** — snapshot current channel members
-- **Generate Report** — report last ended session
-- **End All Sessions** — force-end all (dangerous, clearly marked)
-- **Open Terminal** — navigate to terminal with context
-
-### Step 8: View logs
-Navigate to `/logs`:
-- Real-time log viewer from SQLite `logs` table
-- Filter by level (info, warn, error, debug, success)
-- Filter by source
-- Search
-- Auto-refresh every 10s
-
-### Step 9: View sessions
-Navigate to `/sessions`:
-- Active sessions at top with live pulse indicator
-- Historical sessions in table with participant counts, voice minutes, avg score
-- Click any session for detail page
-
-### Step 10: Open terminal
-Navigate to `/terminal`:
-- Context selector at top (server, voice channel, text channel)
-- Selected context is automatically injected into commands
-- Command history (↑/↓), Tab autocomplete
-- Shows output, execution ms, logs, rerun button
-- Raw JSON expandable for data inspection
-
-Try: `!health-check`, `!bot-status`, `!session-status`
-
-### Step 11: End a session
-From `/control`, click **End Session** on an active session card.
-Or from the terminal: `!session-end`
-
-### Step 12: View session detail
-Navigate to `/sessions` → click Detail → for any session, shows:
-- Status, duration, participants
-- Attendance summary
-- Participation scores
-- Voice events timeline
+### DATABASE_PATH priority
+```js
+const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '..', 'data.db');
+```
+Bot always logs the actual path used on startup.
 
 ---
 
-## API Reference
+## Bot API Endpoints
 
-### Dashboard → Bot API
+All endpoints require `x-api-key` header.
 
+### System
 | Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/health` | Bot runtime health |
-| GET | `/api/discord/guilds` | All guilds bot is in |
-| GET | `/api/discord/guilds/:guildId/voice-channels` | Voice channels + members |
-| GET | `/api/discord/guilds/:guildId/text-channels` | Text channels |
-| GET | `/api/discord/guilds/:guildId/members` | Guild members |
-| POST | `/api/actions/session/start` | Start a session |
-| POST | `/api/actions/session/end` | End a session |
-| POST | `/api/actions/session/report` | Generate session report |
-| GET | `/api/actions/list-sessions` | List active sessions |
-| GET | `/api/actions/db-status` | Database status |
-| GET | `/api/actions/check-permissions` | Bot permission check |
-| POST | `/api/actions/sync-voice-members` | Sync voice channel members |
-| POST | `/api/execute` | Execute any bot command |
-| GET | `/api/commands` | Command registry |
+|---|---|---|
+| GET | `/health` | Bot runtime health |
+| GET | `/api/system/runtime` | Full runtime stats |
+| GET | `/api/system/database` | DB path + tables + counts |
+| GET | `/api/actions/db-status` | DB health check |
+| GET | `/api/actions/check-permissions` | Bot Discord permissions |
 
-### Dashboard Next.js API Routes
+### Discord
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/discord/guilds` | All guilds |
+| GET | `/api/discord/guilds/:id/voice-channels` | Voice channels + members |
+| GET | `/api/discord/guilds/:id/text-channels` | Text channels |
+| GET | `/api/discord/guilds/:id/members` | Guild members |
 
-| Path | Description |
-|------|-------------|
-| `/api/system/health` | Proxies bot health |
-| `/api/discord/guilds` | Proxies guilds |
-| `/api/discord/guilds/[guildId]/voice-channels` | Proxies voice channels |
-| `/api/discord/guilds/[guildId]/text-channels` | Proxies text channels |
-| `/api/discord/guilds/[guildId]/members` | Proxies members |
-| `/api/actions/session/start` | Proxies session start |
-| `/api/actions/session/end` | Proxies session end |
-| `/api/actions/quick` | Unified quick-action proxy |
-| `/api/execute` | Proxies command execution |
-| `/api/sessions` | Reads SQLite sessions (readonly) |
-| `/api/sessions/[id]` | Session detail from SQLite |
-| `/api/logs` | Reads SQLite logs (readonly) |
-| `/api/users` | Reads SQLite users (readonly) |
+### Sessions
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/actions/session/start` | Start session (structured) |
+| POST | `/api/actions/session/end` | End session |
+| GET | `/api/sessions` | All sessions |
+| GET | `/api/sessions/active` | Active sessions |
+| GET | `/api/sessions/:id` | Session by ID |
+| GET | `/api/actions/list-sessions` | Active sessions (legacy) |
+| POST | `/api/actions/sync-voice-members` | Sync voice members |
+
+### Scheduling
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/actions/schedule/session` | Schedule a future session |
+| POST | `/api/actions/schedule/message` | Schedule a future message |
+| GET | `/api/actions/schedule` | List scheduled items |
+| GET | `/api/actions/schedule/:id` | Get scheduled item |
+| POST | `/api/actions/schedule/:id/cancel` | Cancel scheduled item |
+| POST | `/api/actions/schedule/:id/run-now` | Execute immediately |
+
+### Messages
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/actions/message/send` | Send message now |
+| GET | `/api/actions/message/deliveries` | Message delivery history |
+
+### Reports
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/actions/session/report` | Generate report |
+| GET | `/api/actions/reports` | List all reports |
+| GET | `/api/actions/reports/:sessionId` | Get report by session |
+| POST | `/api/actions/reports/:sessionId/post` | Generate + post to Discord |
+
+### Activity & Logs
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/activity` | Unified activity feed |
+| GET | `/api/logs` | System logs |
 
 ---
 
-## Session Start Payload
+## Scheduler
 
+The scheduler polls the `scheduled_items` table every **20 seconds**.
+
+### How it works
+1. On bot ready → `initScheduler(client)` called
+2. Immediately executes any due jobs from before restart
+3. Stale "running" jobs (>5 min) are reset to "scheduled"
+4. Duplicate execution prevented via in-memory lock
+
+### Schedule a session
 ```json
+POST /api/actions/schedule/session
 {
-  "guildId": "1498223573565964440",
-  "voiceChannelId": "123456789",
-  "textChannelId": "987654321",
+  "guildId": "...",
+  "voiceChannelId": "...",
+  "textChannelId": "...",
+  "title": "Study Session",
+  "scheduledFor": "2026-05-09T14:00:00.000Z",
   "durationMinutes": 60,
-  "requestedBy": "dashboard-admin",
-  "source": "dashboard"
+  "requestedBy": "instructor"
+}
+```
+
+### Schedule a message
+```json
+POST /api/actions/schedule/message
+{
+  "guildId": "...",
+  "textChannelId": "...",
+  "content": "Session starts in 10 minutes!",
+  "scheduledFor": "2026-05-09T13:50:00.000Z"
 }
 ```
 
 ---
 
+## Message Sending
+
+```json
+POST /api/actions/message/send
+{
+  "guildId": "...",
+  "textChannelId": "...",
+  "content": "Hello everyone!",
+  "requestedBy": "instructor"
+}
+```
+
+Validates: content length (≤2000), channel exists, is text-based, bot can send.
+
+---
+
+## Activity Feed
+
+```
+GET /api/activity?limit=100
+GET /api/activity?sessionId=42
+GET /api/activity?guildId=...&type=SESSION_STARTED
+```
+
+Returns human-readable entries combining `activity_events` and error logs:
+```json
+{
+  "id": "ae_123",
+  "timestamp": "2026-05-08T...",
+  "type": "SESSION_STARTED",
+  "label": "Recording session started",
+  "severity": "info",
+  "sessionId": 42
+}
+```
+
+---
+
+## New Discord Commands
+
+| Command | Description |
+|---|---|
+| `!schedule-session --channel <id> --at "<datetime>" --duration 60 --title "..."` | Schedule a future session |
+| `!scheduled [--type session\|message] [--status scheduled]` | List scheduled items |
+| `!cancel-scheduled --id <itemId>` | Cancel a scheduled item |
+| `!send-message --channel <id> --content "..."` | Send message immediately |
+| `!schedule-message --channel <id> --at "<datetime>" --content "..."` | Schedule a message |
+| `!activity [--limit 20] [--session <id>]` | Show activity feed |
+
+---
+
 ## Troubleshooting
 
-### Next.js params error (fixed)
-If you see: `Route used params.guildId. params is a Promise`
-→ Already fixed. All dynamic routes now use `await context.params`.
-
-### Terminal crash (fixed)
-If you see: `Cannot read properties of undefined (reading 'length')`
-→ Already fixed. All entry fields are normalized with safe defaults.
+### DB path mismatch
+Bot logs: `[DATABASE] Using DB path: ...`
+- Ensure `DATABASE_PATH` is set in both `.env` and `dashboard/.env.local`
+- Both must point to the same absolute path
 
 ### Bot API offline
-- Symptom: Red "Bot API Offline" banner on /control
-- Fix: Run `node index.js` from project root
-- Dashboard DB pages (/logs, /sessions, /users) still work offline
+- Run `node index.js` from project root
+- Check port 4000 isn't blocked
 
-### DB path mismatch
-- Symptom: "Database not found" on overview page
-- Fix: Set `DATABASE_PATH=C:/Users/ADAM/Desktop/Discord-Activity-Intelligence-Bot/data.db` in `dashboard/.env.local`
+### Scheduler not running jobs
+- Check `scheduled_for` is a valid ISO datetime
+- Scheduled time must be in the future
+- Bot must be running; scheduler starts on `ready` event
 
-### API key mismatch
-- Symptom: 401 errors in bot API logs
-- Fix: Ensure `BOT_API_KEY` matches in both `.env` (bot) and `dashboard/.env.local`
+### Report is empty
+- Report needs `voice_events` data — session must have had voice activity
+- If `attendance_summary` is empty, report falls back to computing from raw voice events
 
-### No Discord channels in dropdown
-- Symptom: Empty channel dropdowns on /control
-- Fix: Bot must be in the Discord server and have ViewChannel permissions
-- Run "Check Permissions" quick action to diagnose
+### Logs missing
+- Dashboard `/api/logs` proxies through bot API (requires bot running)
+- Check `DATABASE_PATH` env var
 
-### Terminal result shows no output
-- Symptom: Empty output after command execution
-- Cause: Bot returned output inside `.data.output`, dashboard now normalizes this
-- Already fixed in `/api/execute` route
-
-### Missing bot permissions
-- Symptom: "Check Permissions" shows missing permissions
-- Fix: Reinvite bot with correct permission scopes in Discord Developer Portal
+### API key mismatch (401 errors)
+- Ensure `BOT_API_KEY` matches in bot `.env` and `dashboard/.env.local`
 
 ---
 
@@ -246,31 +286,35 @@ If you see: `Cannot read properties of undefined (reading 'length')`
 
 ```
 project/
+├── index.js                    # Bot entry + scheduler init
+├── database/db.js              # SQLite init + schema + DATABASE_PATH
 ├── core/
-│   ├── apiServer.js          # Bot HTTP API server (port 4000)
-│   └── commandExecutor.js    # Command execution engine
+│   ├── apiServer.js            # Bot HTTP API (port 4000) — all endpoints
+│   └── commandExecutor.js      # Command execution engine
+├── services/
+│   ├── schedulerService.js     # Scheduler (polls DB, executes due items)
+│   ├── messageService.js       # Send/schedule messages
+│   ├── sessionActionService.js # Structured session workflows
+│   ├── reportService.js        # Real report generation from DB
+│   └── activityFeedService.js  # Unified human-readable activity feed
 ├── modules/sessions/
-│   └── sessionService.js     # Session lifecycle management
-├── models/                   # SQLite model layer
-├── commands/                 # Bot command registry
-├── dashboard/
-│   ├── app/
-│   │   ├── (dashboard)/
-│   │   │   ├── page.tsx      # Overview
-│   │   │   ├── control/      # Session Control (main operator console)
-│   │   │   ├── sessions/     # Session list + history
-│   │   │   ├── terminal/     # Command terminal
-│   │   │   ├── logs/         # Log viewer
-│   │   │   └── users/        # User analytics
-│   │   └── api/
-│   │       ├── actions/      # Session start/end/quick proxy routes
-│   │       ├── discord/      # Guild/channel/member proxy routes
-│   │       ├── execute/      # Command execution proxy
-│   │       ├── sessions/     # SQLite session reads
-│   │       ├── logs/         # SQLite log reads
-│   │       └── users/        # SQLite user reads
-│   └── server/
-│       ├── db/               # SQLite connection (readonly)
-│       └── repositories/     # DB query functions
-└── data.db                   # Shared SQLite database
+│   ├── sessionService.js       # Core session lifecycle
+│   └── sessionSummaryService.js# Attendance summary
+├── models/                     # SQLite model layer
+├── commands/                   # Bot command registry
+│   ├── session/schedule-session.js
+│   ├── session/scheduled.js
+│   ├── session/cancel-scheduled.js
+│   ├── interaction/send-message.js
+│   ├── interaction/schedule-message.js
+│   └── system/activity.js
+└── dashboard/
+    └── app/api/
+        ├── activity/           # Activity feed proxy
+        ├── logs/               # Logs proxy (bot API)
+        ├── sessions/active/    # Active sessions proxy
+        └── actions/
+            ├── schedule/       # Scheduling proxies
+            ├── message/        # Message proxies
+            └── reports/        # Report proxies
 ```

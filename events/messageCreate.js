@@ -30,13 +30,21 @@ module.exports = {
         if (!command) return;
 
         try {
-            await Promise.resolve(command.execute(message, parsed.positional, {
-                parsed,
-                commands
-            }));
+            // Pass parsed.options as `args` so commands can use args.channel, args.duration, etc.
+            // Also pass `parsed` in context for legacy commands using { parsed } destructuring.
+            const result = await Promise.resolve(
+                command.execute(message, parsed.options, {
+                    parsed,
+                    commands
+                })
+            );
+
+            // If the command returned a string, reply with it (new commands return strings)
+            if (result && typeof result === 'string') {
+                await message.reply(result).catch(() => {});
+            }
         } catch (err) {
             console.error(`[COMMAND ERROR] ${commandName}`, err);
-
             try {
                 await message.reply('❌ Something went wrong while executing this command.');
             } catch (_) { }
