@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/participation/participation-raw.js
 //
 // Raw dump of all participation_summary rows for a session.
@@ -8,12 +9,12 @@
 
 const participationSummaryModel = require('../../models/participationSummaryModel');
 const { resolveSessionContext } = require('../../utils/commandResolver');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 const { COMMAND_LIMITS } = require('../../config/constants');
 
 module.exports = {
     name: 'participation-raw',
+    requiredPermission: 'instructor',
     description: 'Raw dump of all participation_summary rows for a session.',
     usage: '!participation-raw [--id <n>] [--channel <#ch>] [--latest] [--limit <n>]',
     options: [
@@ -23,12 +24,12 @@ module.exports = {
         { name: 'limit', type: 'number', required: false, description: `Number of results (default: ${COMMAND_LIMITS.MAX}, max: ${COMMAND_LIMITS.MAX})` }
     ],
 
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
             const ctx = resolveSessionContext(message, options);

@@ -1,3 +1,5 @@
+const { sendResponse } = require('utils/responseHelper');
+const { requireInstructor } = require('../utils/permissions');
 // commands/session-summary.js
 
 const sessionSummaryService = require('../modules/sessions/sessionSummaryService');
@@ -7,16 +9,23 @@ const logger = require('../utils/logger');
 module.exports = {
     name: 'session-summary',
     category: 'session',
+    requiredPermission: 'instructor',
     aliases: ['summary'],
     description: 'Displays the attendance summary of a specific session.',
     usage: '!session-summary [--latest] [--id <number>] [--channel <mention>]',
     options: [
         { name: 'latest', type: 'boolean', required: false, description: 'Get the summary for the most recent session across all channels.' },
         { name: 'id', type: 'number', required: false, description: 'Get the summary for a specific session ID.' },
-        { name: 'channel', type: 'channel', required: false, description: 'Get the most recent summary for a specific voice channel.' }
+        { name: 'channel', type: 'channel', required: false, description: 'Get the most recent summary for a specific voice channel.' },
+        { name: 'private', type: 'boolean', required: false, description: 'Send the response privately by DM' },
+        { name: 'quiet', type: 'boolean', required: false, description: 'Only send a short confirmation' },
+        { name: 'silent', type: 'boolean', required: false, description: 'Do not send a public response' }
     ],
 
     execute: async (message, _args, { parsed } = {}) => {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             const options = parsed?.options || {};
             const { latest, id, channel } = options;
@@ -26,7 +35,7 @@ module.exports = {
             if (id) {
                 sessionId = parseInt(id, 10);
                 if (isNaN(sessionId)) {
-                    return message.reply('❌ Invalid session ID provided.');
+                    return sendResponse(message, '❌ Invalid session ID provided.', parsed?.options || {});
                 }
             } else if (latest) {
                 const sessions = sessionModel.getAllSessions();
@@ -41,34 +50,34 @@ module.exports = {
                     sessionId = chanSession.id;
                 }
             } else {
-                return message.reply('❌ Please specify how to find the session: `--latest`, `--id <number>`, or `--channel <mention>`.');
+                return sendResponse(message, '❌ Please specify how to find the session: `--latest`, `--id <number>`, or `--channel <mention>`.', parsed?.options || {});
             }
 
             if (!sessionId) {
-                return message.reply('❌ No matching session found.');
+                return sendResponse(message, '❌ No matching session found.', parsed?.options || {});
             }
 
             const session = sessionModel.getSessionById(sessionId);
             if (!session) {
-                return message.reply(`❌ Session #${sessionId} not found.`);
+                return sendResponse(message, `❌ Session #${sessionId} not found.`, parsed?.options || {});
             }
 
             if (!session.end_time) {
-                return message.reply(`⚠️ Session #${sessionId} is still active. End it first to view its summary.`);
+                return sendResponse(message, `⚠️ Session #${sessionId} is still active. End it first to view its summary.`, parsed?.options || {});
             }
 
             const summary = sessionSummaryService.getSessionSummary(sessionId);
 
             if (!summary || summary.totalUsers === 0) {
-                return message.reply(`📊 Session #${sessionId} has no attendance data.`);
+                return sendResponse(message, `📊 Session #${sessionId} has no attendance data.`, parsed?.options || {});
             }
 
             const formatted = sessionSummaryService.formatSummary(summary);
 
-            return message.reply({ content: formatted });
+            return sendResponse(message, { content: formatted }, parsed?.options || {});
         } catch (error) {
             logger.error(`session-summary command error: ${error.message}`);
-            return message.reply('❌ An error occurred while fetching the session summary.');
+            return sendResponse(message, '❌ An error occurred while fetching the session summary.', parsed?.options || {});
         }
     }
 };

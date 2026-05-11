@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/system/health-check.js
 //
 // System integrity validator — checks for data anomalies across the DB.
@@ -15,21 +16,21 @@
 // ---------------------------------------------------------------------------
 
 const db = require('../../database/db');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 module.exports = {
     name: 'health-check',
+    requiredPermission: 'instructor',
     description: 'Validate system data integrity across all tables (instructor only).',
     usage: '!health-check',
     options: [],
 
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const checks = [];
             let failCount = 0;

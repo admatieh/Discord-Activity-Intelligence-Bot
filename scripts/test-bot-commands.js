@@ -21,7 +21,7 @@ if (USE_REAL_DB) {
     console.log('[ENV] Using isolated test database (data.commands.test.db)');
     process.env.DATABASE_PATH = testDbPath;
     if (fs.existsSync(testDbPath)) {
-        try { fs.unlinkSync(testDbPath); } catch (e) {}
+        try { fs.unlinkSync(testDbPath); } catch (e) { }
     }
 }
 
@@ -119,14 +119,25 @@ class MockUser {
 }
 
 class MockMember {
-    constructor(user) {
+    constructor(user, roleType = 'admin') {
         this.id = user.id;
         this.user = user;
         this.displayName = user.username;
         this.voice = { channel: null };
         this.roles = { cache: new MockCollection() };
+        this._roleType = roleType;
+
+        // Setup permissions based on roleType
+        if (roleType === 'instructor') {
+            // Mock instructor role name
+            this.roles.cache.set('inst_1', { name: 'Instructor' });
+        }
+
         this.permissions = {
-            has: () => true
+            has: (perm) => {
+                if (perm === 'Administrator') return this._roleType === 'admin';
+                return true;
+            }
         };
     }
 }
@@ -183,19 +194,19 @@ class MockMessage {
     }
 }
 
-function createMockEnv() {
+function createMockEnv(roleType = 'admin') {
     const guild = new MockGuild('guild_test', 'Test Guild');
     const textChannel = new MockChannel('text_test', 'general', true);
     const voiceChannel = new MockChannel('voice_test', 'Voice 1', false);
-    
+
     guild.channels.cache.set(textChannel.id, textChannel);
     guild.channels.cache.set(voiceChannel.id, voiceChannel);
 
     const user = new MockUser('user_test', 'tester');
-    const member = new MockMember(user);
+    const member = new MockMember(user, roleType);
     member.voice.channel = voiceChannel;
     guild.members.cache.set(member.id, member);
-    
+
     // Add mock members to voice channel
     voiceChannel.members.set(member.id, member);
 
@@ -217,12 +228,13 @@ async function safeExecute(command, message, argsObj, parsedContext) {
         returned: undefined,
         replies: message.replies,
         sends: message.channel ? message.channel.sends : [],
+        dms: message.author ? message.author.sends : [],
         okLike: false
     };
     try {
         const val = await Promise.resolve(command.execute(message, argsObj, parsedContext));
         result.returned = val;
-        
+
         // Detect basic ok/success pattern
         if (val && typeof val === 'object') {
             result.okLike = val.ok === true || val.success === true;
@@ -310,7 +322,7 @@ async function runTests() {
             };
             const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
             assert(!res.threw, 'Command crashed: ' + (res.error && res.error.stack));
-            
+
             // Should have returned string or replied
             assert(res.okLike || res.returned || res.replies.length > 0, 'No positive response');
         });
@@ -404,7 +416,7 @@ async function runTests() {
 
         await test('[participation-top] invalid limit falls back', async () => {
             const env = createMockEnv();
-            
+
             // Insert dummy session & record to pass the 'No participation data' early return
             const db = require('./../database/db');
             db.prepare("INSERT OR IGNORE INTO sessions (id, guild_id, voice_channel_id, status) VALUES (1, ?, ?, 'COMPLETED')").run(env.guild.id, env.voiceChannel.id);
@@ -492,7 +504,7 @@ async function runTests() {
             assert(!res.threw, 'Command crashed: ' + (res.error && res.error.stack));
             assert(res.replies.length > 0 || res.returned, 'Command did not reply or return');
         });
-        
+
         // session-end
         await test('[session-end] graceful no-session handling', async () => {
             const env = createMockEnv();
@@ -503,11 +515,209 @@ async function runTests() {
             assert(!res.threw, 'Command crashed: ' + (res.error && res.error.stack));
             // Ensure no crash on ending nonexistent session
         });
+
+        // ==========================================
+        // PERMISSION AUDIT TESTS
+        // ==========================================
+        console.log('\n--- PERMISSION AUDIT TESTS ---');
+
+        const PUBLIC_WHITELIST = ['help', 'whoami', 'my-attendance', 'my-participation'];
+
+        // Test 1 & 2: requiredPermission validation
+        await test('[permissions] validate requiredPermission metadata', async () => {
+            for (const cmd of commandList) {
+                assert(cmd.requiredPermission, `Command ${cmd.name} missing requiredPermission metadata`);
+                assert(['public', 'instructor', 'admin'].includes(cmd.requiredPermission), `Command ${cmd.name} has invalid requiredPermission: ${cmd.requiredPermission}`);
+
+                if (cmd.requiredPermission === 'public') {
+                    assert(PUBLIC_WHITELIST.includes(cmd.name), `Command ${cmd.name} is public but not in the whitelist!`);
+                } else {
+                    assert(!PUBLIC_WHITELIST.includes(cmd.name), `Command ${cmd.name} is in public whitelist but marked as ${cmd.requiredPermission}!`);
+                }
+            }
+        });
+
+        // Test 3: student denied for non-public commands
+        await test('[permissions] student denied on non-public commands', async () => {
+            const env = createMockEnv('student');
+            for (const cmd of commandList) {
+                if (cmd.requiredPermission !== 'public') {
+                    const msg = new MockMessage(`!${cmd.name}`, env.guild, env.textChannel, env.member);
+                    const res = await safeExecute(cmd, msg, {}, { parsed: { options: {} }, commands });
+                    assert(!res.threw, `Command ${cmd.name} crashed for student`);
+
+                    const reply = res.replies[0] || '';
+                    assert(reply.includes('❌ You need') || reply.includes('❌ You must be'),
+                        `Command ${cmd.name} failed to block student. Reply was: ${reply}`);
+                }
+            }
+        });
+
+        // Test 4 & 5: vulnerable commands and aliases
+        await test('[permissions] check known vulnerable commands and aliases', async () => {
+            const env = createMockEnv('student');
+            const vulnerableNames = ['report', 'session-report', 'generate-report', 'session-info', 'session-summary'];
+
+            for (const name of vulnerableNames) {
+                const cmd = commands.get(name);
+                assert(cmd, `Command/alias ${name} not found`);
+
+                const msg = new MockMessage(`!${name}`, env.guild, env.textChannel, env.member);
+                const res = await safeExecute(cmd, msg, {}, { parsed: { options: {} }, commands });
+
+                const reply = res.replies[0] || '';
+                assert(reply.includes('❌ You need'), `Alias/Command ${name} allowed student access! Reply: ${reply}`);
+            }
+        });
+
+        // Test 6: instructor mock user allowed
+        await test('[permissions] instructor mock user allowed for instructor commands', async () => {
+            const env = createMockEnv('instructor');
+            for (const cmd of commandList) {
+                if (cmd.requiredPermission === 'instructor') {
+                    const msg = new MockMessage(`!${cmd.name}`, env.guild, env.textChannel, env.member);
+                    const res = await safeExecute(cmd, msg, {}, { parsed: { options: {} }, commands });
+                    // It can fail later, but it shouldn't fail with the permission message
+                    const reply = res.replies[0] || '';
+                    assert(!reply.includes('❌ You need the **Instructor** role'), `Instructor blocked from ${cmd.name}`);
+                }
+            }
+        });
+
+        // Test 7: admin-only commands
+        await test('[permissions] admin-only commands enforced', async () => {
+            for (const cmd of commandList) {
+                if (cmd.requiredPermission === 'admin') {
+                    // Student
+                    const studentEnv = createMockEnv('student');
+                    const studentMsg = new MockMessage(`!${cmd.name}`, studentEnv.guild, studentEnv.textChannel, studentEnv.member);
+                    const studentRes = await safeExecute(cmd, studentMsg, {}, { parsed: { options: {} }, commands });
+                    assert((studentRes.replies[0] || '').includes('❌ You must be'), `Student bypassed admin check on ${cmd.name}`);
+
+                    // Instructor
+                    const instEnv = createMockEnv('instructor');
+                    const instMsg = new MockMessage(`!${cmd.name}`, instEnv.guild, instEnv.textChannel, instEnv.member);
+                    const instRes = await safeExecute(cmd, instMsg, {}, { parsed: { options: {} }, commands });
+                    assert((instRes.replies[0] || '').includes('❌ You must be'), `Instructor bypassed admin check on ${cmd.name}`);
+
+                    // Admin
+                    const adminEnv = createMockEnv('admin');
+                    const adminMsg = new MockMessage(`!${cmd.name}`, adminEnv.guild, adminEnv.textChannel, adminEnv.member);
+                    const adminRes = await safeExecute(cmd, adminMsg, {}, { parsed: { options: {} }, commands });
+                    assert(!(adminRes.replies[0] || '').includes('❌ You must be'), `Admin blocked on ${cmd.name}`);
+                }
+            }
+        });
+
+        // Test 8: help visibility
+        await test('[permissions] help visibility correctly filtered', async () => {
+            const helpCmd = commands.get('help');
+
+            // Student
+            const studentEnv = createMockEnv('student');
+            const studentMsg = new MockMessage('!help', studentEnv.guild, studentEnv.textChannel, studentEnv.member);
+            const studentRes = await safeExecute(helpCmd, studentMsg, {}, { parsed: { options: {} }, commands });
+            const studentOutput = [...studentRes.replies, ...studentRes.sends].join('\n');
+            assert(!studentOutput.includes('session-start'), 'Student can see instructor commands in help');
+            assert(!studentOutput.includes('add-instructor'), 'Student can see admin commands in help');
+            assert(studentOutput.includes('my-attendance'), 'Student cannot see public commands');
+
+            // Instructor
+            const instEnv = createMockEnv('instructor');
+            const instMsg = new MockMessage('!help', instEnv.guild, instEnv.textChannel, instEnv.member);
+            const instRes = await safeExecute(helpCmd, instMsg, {}, { parsed: { options: {} }, commands });
+            const instOutput = [...instRes.replies, ...instRes.sends].join('\n');
+            assert(instOutput.includes('session-start'), 'Instructor cannot see instructor commands in help');
+            assert(!instOutput.includes('add-instructor'), 'Instructor can see admin commands in help');
+        });
+
     } else {
         skip('Focused tests', 'Real DB mode (read-only)');
     }
 
     // Phase 3: Command Executor (Dashboard Context)
+    // ==========================================
+    // RESPONSE HELPER TESTS
+    // ==========================================
+    console.log('\n--- RESPONSE HELPER TESTS ---');
+
+    await test('[response] public mode replies publicly', async () => {
+        const env = createMockEnv('instructor');
+        const cmd = commands.get('report');
+        const msg = new MockMessage('!report', env.guild, env.textChannel, env.member);
+        const res = await safeExecute(cmd, msg, { latest: true }, { parsed: { options: { latest: true } }, commands });
+        assert(res.replies.length > 0, 'Did not reply publicly');
+        assert(res.dms.length === 0, 'Should not DM');
+    });
+
+    await test('[response] private mode DMs author and sends public confirmation', async () => {
+        const env = createMockEnv('instructor');
+        const cmd = commands.get('report');
+        const msg = new MockMessage('!report', env.guild, env.textChannel, env.member);
+        const res = await safeExecute(cmd, msg, { latest: true, private: true }, { parsed: { options: { latest: true, private: true } }, commands });
+        assert(res.dms.length > 0, 'Did not DM author');
+        assert(res.replies.some(r => typeof r === 'string' && r.includes('Sent privately')), 'Did not send public confirmation');
+    });
+
+    await test('[response] private mode handles DM failure', async () => {
+        const env = createMockEnv('instructor');
+        env.user.failDMs = true;
+        const cmd = commands.get('report');
+        const msg = new MockMessage('!report', env.guild, env.textChannel, env.member);
+        const res = await safeExecute(cmd, msg, { latest: true, private: true }, { parsed: { options: { latest: true, private: true } }, commands });
+        assert(res.dms.length === 0, 'Should not have DMd');
+        assert(res.replies.some(r => typeof r === 'string' && r.includes('Failed to send DM')), 'Did not handle DM failure gracefully');
+    });
+
+    await test('[response] quiet mode sends short confirmation on success', async () => {
+        const env = createMockEnv('instructor');
+        const cmd = commands.get('schedule-session');
+        const msg = new MockMessage('!schedule-session', env.guild, env.textChannel, env.member);
+        const args = { channel: env.voiceChannel.id, at: new Date(Date.now() + 60000).toISOString(), duration: 45, quiet: true };
+        const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+        assert(res.replies.some(r => typeof r === 'string' && r.includes('✅ Done.')), 'Did not send quiet success message');
+        assert(!res.replies.some(r => typeof r === 'string' && r.includes('scheduled for')), 'Exposed full output in quiet mode');
+    });
+
+    await test('[response] quiet mode sends short failure on failure', async () => {
+        const env = createMockEnv('instructor');
+        const cmd = commands.get('report');
+        const msg = new MockMessage('!report', env.guild, env.textChannel, env.member);
+        const args = { id: 999999, quiet: true }; // Invalid ID
+        const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+        assert(res.replies.some(r => typeof r === 'string' && r.includes('Session #999999 not found')), 'Did not send failure message in quiet mode');
+    });
+
+    await test('[response] silent mode sends no public reply', async () => {
+        const env = createMockEnv('instructor');
+        const cmd = commands.get('schedule-session');
+        const msg = new MockMessage('!schedule-session', env.guild, env.textChannel, env.member);
+        const args = { channel: env.voiceChannel.id, at: new Date(Date.now() + 60000).toISOString(), duration: 45, silent: true };
+        const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+        assert(res.replies.length === 0, 'Sent public reply in silent mode');
+    });
+
+    await test('[response] activity --private test', async () => {
+        const env = createMockEnv('instructor');
+        const cmd = commands.get('activity');
+        const msg = new MockMessage('!activity', env.guild, env.textChannel, env.member);
+        const args = { private: true };
+        const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+        assert(res.dms.length > 0, 'Did not DM activity');
+        assert(res.replies.some(r => typeof r === 'string' && r.includes('Sent privately')), 'Did not confirm');
+    });
+
+    await test('[response] send-message --quiet test', async () => {
+        const env = createMockEnv('instructor');
+        messageService.setClient(env.client); // Needed for send-message
+        const cmd = commands.get('send-message');
+        const msg = new MockMessage('!send-message', env.guild, env.textChannel, env.member);
+        const args = { channel: env.textChannel.id, content: 'Test quiet', quiet: true };
+        const res = await safeExecute(cmd, msg, args, { parsed: { options: args }, commands });
+        assert(res.replies.some(r => typeof r === 'string' && r.includes('✅ Done.')), 'Did not send quiet success message');
+        assert(res.sends.length > 0, 'Did not actually send the message to the channel');
+    });
+
     console.log('\n--- COMMAND EXECUTOR TESTS ---');
     if (!USE_REAL_DB) {
         await test('[commandExecutor] Execute health-check', async () => {
@@ -538,7 +748,7 @@ async function runTests() {
     console.log(`Warnings: ${stats.warnings}`);
     console.log(`Skipped: ${stats.skipped}`);
     console.log(`Critical failures: ${stats.critical}`);
-    
+
     if (failures.length > 0) {
         console.log('\nFailures Details:');
         failures.forEach(f => {
@@ -547,10 +757,10 @@ async function runTests() {
             if (f.stack) console.log(f.stack.split('\n').slice(0, 3).join('\n'));
         });
     }
-    
+
     // Cleanup
     if (!USE_REAL_DB && fs.existsSync(testDbPath)) {
-        try { fs.unlinkSync(testDbPath); } catch (e) {}
+        try { fs.unlinkSync(testDbPath); } catch (e) { }
     }
 
     if (stats.critical > 0) process.exit(1);

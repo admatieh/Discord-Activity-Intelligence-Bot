@@ -1,23 +1,29 @@
-// dashboard/app/api/actions/reports/route.ts
-import { NextResponse } from 'next/server';
-
-const BOT_API_URL = process.env.BOT_API_URL || 'http://127.0.0.1:4000/api';
-const BOT_API_KEY = process.env.BOT_API_KEY || 'local_dashboard_key_123';
+import { NextResponse } from "next/server"
+import { botGet } from "@/lib/server/botApi"
+import { mapReportListRow } from "@/lib/server/botMappers"
 
 export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const params = new URLSearchParams();
-    if (searchParams.get('guildId')) params.set('guildId', searchParams.get('guildId')!);
-    if (searchParams.get('limit')) params.set('limit', searchParams.get('limit')!);
+  const { searchParams } = new URL(request.url)
+  const sp = new URLSearchParams()
+  const guildId = searchParams.get("guildId")
+  const limit = searchParams.get("limit")
+  if (guildId) sp.set("guildId", guildId)
+  if (limit) sp.set("limit", limit)
+  const qs = sp.toString()
+  const path = qs ? `/actions/reports?${qs}` : "/actions/reports"
 
-    const res = await fetch(`${BOT_API_URL}/actions/reports?${params.toString()}`, {
-      headers: { 'x-api-key': BOT_API_KEY },
-      cache: 'no-store'
-    });
-    const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Bot offline', reports: [] }, { status: 503 });
+  const result = await botGet<{ ok?: boolean; reports?: unknown[] }>(path)
+  if (!result.ok) {
+    return NextResponse.json({
+      ok: false,
+      error: result.error ?? "Bot API is offline",
+      data: [],
+    })
   }
+  const rows = Array.isArray(result.data?.reports) ? result.data.reports : []
+  const data = rows
+    .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object")
+    .map(mapReportListRow)
+
+  return NextResponse.json({ ok: true, data })
 }

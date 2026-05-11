@@ -1,53 +1,360 @@
-import { Topbar } from '@/components/dashboard/topbar'
-import { MessageSquare, Send, Users, AlignLeft } from 'lucide-react'
+"use client"
+
+import { useState, useEffect } from "react"
+import {
+  MessageSquare,
+  Send,
+  Calendar,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import PageHeader from "@/components/layout/PageHeader"
+import StatusBadge from "@/components/ui/status-badge"
+import EmptyState from "@/components/states/EmptyState"
+import ErrorPanel from "@/components/states/ErrorPanel"
+import { apiFetch, formatDateTime, formatTimeAgo, safeArray } from "@/lib/helpers"
+import type { Guild, TextChannel, MessageDelivery, ScheduledItem } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import { toast } from "sonner"
+
+const MAX_CHARS = 2000
+type SendMode = "now" | "later"
 
 export default function MessagesPage() {
+  const [guilds, setGuilds] = useState<Guild[]>([])
+  const [textChannels, setTextChannels] = useState<TextChannel[]>([])
+  const [deliveries, setDeliveries] = useState<MessageDelivery[]>([])
+  const [scheduledMessages, setScheduledMessages] = useState<ScheduledItem[]>([])
+  const [loadingGuilds, setLoadingGuilds] = useState(true)
+  const [loadingChannels, setLoadingChannels] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  const [selectedGuild, setSelectedGuild] = useState("")
+  const [selectedChannel, setSelectedChannel] = useState("")
+  const [content, setContent] = useState("")
+  const [sendMode, setSendMode] = useState<SendMode>("now")
+  const [scheduledAt, setScheduledAt] = useState("")
+
+  // Load guilds and deliveries
+  useEffect(() => {
+    async function init() {
+      const [guildsRes, deliveriesRes, scheduledRes] = await Promise.allSettled([
+        apiFetch<Guild[]>("/api/discord/guilds"),
+        apiFetch<MessageDelivery[]>("/api/actions/message/deliveries"),
+        apiFetch<ScheduledItem[]>("/api/actions/schedule"),
+      ])
+      if (guildsRes.status === "fulfilled" && guildsRes.value.ok) {
+        const arr = safeArray<Guild>(guildsRes.value.data)
+        setGuilds(arr)
+        if (arr.length === 1) setSelectedGuild(arr[0].id)
+      }
+      if (deliveriesRes.status === "fulfilled" && deliveriesRes.value.ok) {
+        setDeliveries(safeArray(deliveriesRes.value.data))
+      }
+      if (scheduledRes.status === "fulfilled" && scheduledRes.value.ok) {
+        const all = safeArray<ScheduledItem>(scheduledRes.value.data)
+        setScheduledMessages(all.filter((i) => i.type === "message" && i.status === "scheduled"))
+      }
+      setLoadingGuilds(false)
+    }
+    init()
+  }, [])
+
+  // Load text channels when guild changes
+  useEffect(() => {
+    if (!selectedGuild) {
+      setTextChannels([])
+      setSelectedChannel("")
+      return
+    }
+    async function loadChannels() {
+      setLoadingChannels(true)
+      const res = await apiFetch<TextChannel[]>(
+        `/api/discord/guilds/${selectedGuild}/text-channels`
+      )
+      if (res.ok) setTextChannels(safeArray(res.data))
+      setSelectedChannel("")
+      setLoadingChannels(false)
+    }
+    loadChannels()
+  }, [selectedGuild])
+
+  const canSubmit =
+    Boolean(
+      selectedGuild &&
+        selectedChannel &&
+        content.trim().length > 0 &&
+        content.length <= MAX_CHARS &&
+        !submitting
+    ) && (sendMode === "now" || Boolean(scheduledAt))
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!canSubmit) return
+
+    setSubmitting(true)
+    setResult(null)
+
+    const payload =
+      sendMode === "now"
+        ? {
+            guildId: selectedGuild,
+            textChannelId: selectedChannel,
+            content: content.trim(),
+            requestedBy: "dashboard",
+          }
+        : {
+            guildId: selectedGuild,
+            textChannelId: selectedChannel,
+            content: content.trim(),
+            scheduledFor: new Date(scheduledAt).toISOString(),
+            requestedBy: "dashboard",
+          }
+
+    const endpoint =
+      sendMode === "now"
+        ? "/api/actions/message/send"
+        : "/api/actions/schedule/message"
+
+    const res = await apiFetch(endpoint, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
+
+    if (res.ok) {
+      const msg =
+        sendMode === "now" ? "Message sent successfully." : "Message scheduled successfully."
+      setResult({ ok: true, message: msg })
+      toast.success(msg)
+      setContent("")
+    } else {
+      const msg = res.error ?? "Something went wrong."
+      setResult({ ok: false, message: msg })
+      toast.error(msg)
+    }
+    setSubmitting(false)
+  }
+
+  const selectedChannelObj = textChannels.find((c) => c.id === selectedChannel)
+  const charPct = content.length / MAX_CHARS
+  const charOver = content.length > MAX_CHARS
+
   return (
-    <div className="flex flex-col min-h-screen">
-      <Topbar
+    <div className="p-6 max-w-5xl mx-auto">
+      <PageHeader
         title="Messages"
-        subtitle="Send announcements and messages"
+        description="Send or schedule announcements to Discord channels."
       />
-      <div className="p-6 max-w-4xl mx-auto w-full">
-        <div className="mb-8">
-          <h1 className="text-2xl font-semibold mb-2">Send an Announcement</h1>
-          <p className="text-muted-foreground text-sm">Draft and send messages to Discord text channels from the dashboard.</p>
-        </div>
 
-        <div className="bg-card border border-border rounded-xl shadow-sm p-8">
-          <div className="space-y-6">
-            
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2 flex items-center gap-2">
-                <Users className="w-4 h-4 text-muted-foreground" />
-                Target Channel
-              </label>
-              <select className="w-full bg-background border border-input rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow">
-                <option value="">Select text channel...</option>
-              </select>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Composer */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+            <h2 className="text-sm font-semibold text-foreground">Compose message</h2>
+
+            {/* Server */}
+            <div className="space-y-1.5">
+              <Label>Discord server</Label>
+              <Select value={selectedGuild} onValueChange={setSelectedGuild} disabled={loadingGuilds}>
+                <SelectTrigger>
+                  <SelectValue placeholder={loadingGuilds ? "Loading servers…" : "Select a server…"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {guilds.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2 flex items-center gap-2">
-                <AlignLeft className="w-4 h-4 text-muted-foreground" />
-                Message Content
-              </label>
-              <textarea 
-                rows={6}
-                placeholder="Type your message here..."
-                className="w-full bg-background border border-input rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow resize-y"
-              ></textarea>
+            {/* Channel */}
+            <div className="space-y-1.5">
+              <Label>Channel</Label>
+              {loadingChannels ? (
+                <div className="h-9 rounded-md border border-border bg-muted animate-pulse" />
+              ) : (
+                <Select value={selectedChannel} onValueChange={setSelectedChannel} disabled={!selectedGuild}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a channel…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {textChannels.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
-            <div className="pt-4 flex items-center gap-4">
-              <button className="flex items-center justify-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 px-8 py-2.5 rounded-lg text-sm font-semibold transition-all shadow-sm">
-                <Send className="w-4 h-4" /> Send Now
-              </button>
-              <button className="text-sm font-medium text-muted-foreground hover:text-foreground">
-                Schedule for later
-              </button>
+            {/* Message body */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="message-body">Message</Label>
+                <span className={cn("text-xs", charOver ? "text-destructive" : "text-muted-foreground")}>
+                  {content.length}/{MAX_CHARS}
+                </span>
+              </div>
+              <Textarea
+                id="message-body"
+                placeholder="Write your announcement…"
+                rows={5}
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                className={cn(charOver && "border-destructive focus-visible:ring-destructive")}
+              />
             </div>
 
+            {/* Send mode */}
+            <div className="space-y-2">
+              <Label>When to send</Label>
+              <div className="flex gap-2">
+                {(["now", "later"] as SendMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setSendMode(mode)}
+                    className={cn(
+                      "flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                      sendMode === mode
+                        ? "border-primary bg-accent text-primary"
+                        : "border-border bg-background text-muted-foreground hover:bg-muted"
+                    )}
+                  >
+                    {mode === "now" ? "Send now" : "Schedule"}
+                  </button>
+                ))}
+              </div>
+              {sendMode === "later" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="msg-scheduled-at">Date &amp; time</Label>
+                  <Input
+                    id="msg-scheduled-at"
+                    type="datetime-local"
+                    value={scheduledAt}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    min={new Date().toISOString().slice(0, 16)}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Preview */}
+          {content.trim() && (
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Preview</p>
+              <div className="rounded-md bg-muted px-3 py-2">
+                <p className="text-xs text-muted-foreground mb-0.5">
+                  #{selectedChannelObj?.name ?? "channel"}
+                </p>
+                <p className="text-sm text-foreground whitespace-pre-wrap break-words">{content}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Result */}
+          {result && (
+            <div
+              className={cn(
+                "flex items-start gap-3 rounded-lg border px-4 py-3",
+                result.ok
+                  ? "border-success/20 bg-success-subtle text-success"
+                  : "border-destructive/20 bg-danger-subtle text-destructive"
+              )}
+            >
+              {result.ok ? (
+                <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+              ) : (
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              )}
+              <p className="text-sm">{result.message}</p>
+            </div>
+          )}
+
+          <Button type="submit" disabled={!canSubmit} className="gap-2 w-full">
+            {sendMode === "now" ? (
+              <><Send className="h-4 w-4" /> Send Message</>
+            ) : (
+              <><Calendar className="h-4 w-4" /> Schedule Message</>
+            )}
+          </Button>
+        </form>
+
+        {/* Right side: deliveries + scheduled */}
+        <div className="space-y-6">
+          {/* Scheduled messages */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-medium text-foreground">Scheduled messages</p>
+              <span className="text-xs text-muted-foreground">{scheduledMessages.length} pending</span>
+            </div>
+            {scheduledMessages.length === 0 ? (
+              <EmptyState
+                icon={Calendar}
+                title="No scheduled messages"
+                description="Schedule a message to see it here."
+                className="py-8"
+              />
+            ) : (
+              <div className="space-y-2">
+                {scheduledMessages.slice(0, 5).map((item) => (
+                  <div key={item.id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
+                    <Calendar className="h-4 w-4 text-primary shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-foreground truncate">{item.title || "Scheduled message"}</p>
+                      <p className="text-xs text-muted-foreground">{formatDateTime(item.scheduledAt)}</p>
+                    </div>
+                    <StatusBadge status={item.status} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Recent deliveries */}
+          <div>
+            <p className="text-sm font-medium text-foreground mb-3">Recent deliveries</p>
+            {deliveries.length === 0 ? (
+              <EmptyState
+                icon={MessageSquare}
+                title="No messages sent yet"
+                description="Sent messages will appear here."
+                className="py-8"
+              />
+            ) : (
+              <div className="space-y-2">
+                {deliveries.slice(0, 8).map((d) => (
+                  <div key={d.id} className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
+                    <div className={cn(
+                      "mt-0.5 h-2 w-2 rounded-full shrink-0",
+                      d.status === "sent" ? "bg-success" :
+                      d.status === "failed" ? "bg-destructive" :
+                      "bg-muted-foreground/40"
+                    )} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-foreground truncate">{d.content}</p>
+                      <p className="text-xs text-muted-foreground">
+                        #{d.channelName ?? d.channelId} · {formatTimeAgo(d.sentAt)}
+                      </p>
+                    </div>
+                    <StatusBadge status={d.status} />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

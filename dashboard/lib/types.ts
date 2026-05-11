@@ -1,231 +1,263 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// Core Domain Types for Discord Bot Control Plane
-// ═══════════════════════════════════════════════════════════════════════════
+// ─── Discord / Guild ─────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Base Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-export type LogLevel = 'info' | 'warn' | 'error' | 'debug' | 'trace' | 'success'
-export type LogSource = 'bot' | 'api' | 'db' | 'voice' | 'gateway' | 'system'
-export type SessionStatus = 'active' | 'idle' | 'ended'
-export type CommandCategory = 'moderation' | 'music' | 'utility' | 'fun' | 'admin' | 'system'
-export type SystemStatus = 'healthy' | 'degraded' | 'down'
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Log Entry
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface LogEntry {
+export interface Guild {
   id: string
-  timestamp: string
-  level: LogLevel
-  source: LogSource
-  message: string
-  metadata?: Record<string, unknown>
+  name: string
+  icon?: string
+  memberCount?: number
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Session & Participant
-// ─────────────────────────────────────────────────────────────────────────────
+export interface VoiceChannel {
+  id: string
+  name: string
+  memberCount?: number
+  members?: ChannelMember[]
+}
 
-export interface Participant {
+export interface TextChannel {
+  id: string
+  name: string
+}
+
+export interface ChannelMember {
   id: string
   username: string
-  discriminator: string
+  displayName?: string
   avatar?: string
-  isMuted: boolean
-  isDeafened: boolean
-  isSpeaking: boolean
-  joinedAt: string
 }
+
+// ─── Sessions ────────────────────────────────────────────────────────────────
 
 export interface Session {
   id: string
-  guildId: string
-  guildName: string
-  channelId: string
-  channelName: string
-  status: SessionStatus
-  participantCount: number
-  participants: Participant[]
-  startedAt: string
-  endedAt?: string
-  metrics: SessionMetrics
-}
-
-export interface SessionMetrics {
-  totalMessages: number
-  totalReactions: number
-  totalCommands: number
-  peakParticipants: number
-  avgVoiceMinutes: number
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// User Analytics
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface UserStats {
-  id: string
-  username: string
-  discriminator: string
-  avatar?: string
-  totalCommands: number
-  totalMessages: number
-  totalVoiceMinutes: number
-  totalReactions: number
-  favoriteCommand: string
-  lastActive: string
-  activityScore: number
-  breakdown: {
-    music: number
-    moderation: number
-    utility: number
-    fun: number
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Commands
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface CommandArg {
   name: string
-  type: 'string' | 'number' | 'boolean' | 'user' | 'channel' | 'role'
-  required: boolean
-  description: string
-  choices?: { name: string; value: string | number }[]
-  default?: string | number | boolean
+  guildId: string
+  guildName?: string
+  voiceChannelId: string
+  voiceChannelName?: string
+  textChannelId?: string
+  textChannelName?: string
+  status: "active" | "ended" | "scheduled" | "failed"
+  startedAt?: string
+  endedAt?: string
+  scheduledAt?: string
+  durationMinutes?: number
+  participantCount?: number
+  tracking?: TrackingOptions
+  createdBy?: string
+  source?: string
 }
+
+export interface TrackingOptions {
+  attendance?: boolean
+  voiceTime?: boolean
+  messages?: boolean
+  reactions?: boolean
+  joinLeaveEvents?: boolean
+}
+
+// ─── Scheduled Items ─────────────────────────────────────────────────────────
+
+export interface ScheduledItem {
+  id: string
+  type: "session" | "message"
+  title?: string
+  status: "scheduled" | "completed" | "cancelled" | "failed" | "running"
+  scheduledAt: string
+  guildId?: string
+  guildName?: string
+  channelId?: string
+  channelName?: string
+  durationMinutes?: number
+  createdBy?: string
+  errorMessage?: string
+  payload?: Record<string, unknown>
+}
+
+// ─── Messages ────────────────────────────────────────────────────────────────
+
+export interface MessageDelivery {
+  id: string
+  guildId: string
+  guildName?: string
+  channelId: string
+  channelName?: string
+  content: string
+  status: "sent" | "failed" | "scheduled" | "pending"
+  sentAt?: string
+  scheduledAt?: string
+  errorMessage?: string
+  createdBy?: string
+}
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
+
+export interface Report {
+  sessionId: string
+  sessionName: string
+  guildId?: string
+  guildName?: string
+  status: "available" | "pending" | "missing"
+  generatedAt?: string
+  participantCount?: number
+  durationMinutes?: number
+  startedAt?: string
+  endedAt?: string
+}
+
+export interface ReportDetail {
+  sessionId: string
+  sessionName: string
+  startedAt?: string
+  endedAt?: string
+  durationMinutes?: number
+  participantCount?: number
+  totalVoiceMinutes?: number
+  totalMessages?: number
+  participants?: ParticipantSummary[]
+  topParticipants?: ParticipantSummary[]
+  lowActivityParticipants?: ParticipantSummary[]
+  lateJoiners?: ParticipantSummary[]
+  earlyLeavers?: ParticipantSummary[]
+  timeline?: TimelineEvent[]
+  summary?: string
+  guildId?: string
+  guildName?: string
+  voiceChannelName?: string
+}
+
+export interface ParticipantSummary {
+  userId: string
+  username: string
+  displayName?: string
+  voiceMinutes?: number
+  messageCount?: number
+  reactionCount?: number
+  joinTime?: string
+  leaveTime?: string
+  participationScore?: number
+  attended?: boolean
+}
+
+export interface TimelineEvent {
+  timestamp: string
+  type: string
+  userId?: string
+  username?: string
+  description: string
+}
+
+// ─── Participants ─────────────────────────────────────────────────────────────
+
+export interface Participant {
+  userId: string
+  username: string
+  displayName?: string
+  avatar?: string
+  roles?: string[]
+  currentVoiceChannel?: string
+  sessionsAttended?: number
+  totalVoiceMinutes?: number
+  totalMessages?: number
+  participationScore?: number
+  lastActive?: string
+  guildId?: string
+  isBot?: boolean
+}
+
+// ─── Activity ────────────────────────────────────────────────────────────────
+
+export interface ActivityEvent {
+  id: string
+  type: string
+  label: string
+  description?: string
+  timestamp: string
+  severity?: "info" | "success" | "warning" | "error"
+  sessionId?: string
+  channelId?: string
+  channelName?: string
+  userId?: string
+  username?: string
+  guildId?: string
+}
+
+// ─── Commands ────────────────────────────────────────────────────────────────
 
 export interface Command {
   name: string
-  description: string
-  category: CommandCategory
-  usage: string
-  args: CommandArg[]
-  cooldown: number // seconds
-  permissions: string[]
-  enabled: boolean
-  usageCount: number
-  lastUsed?: string
+  category?: string
+  description?: string
+  aliases?: string[]
+  usage?: string
+  requiredPermission?: string
+  supportsDashboard?: boolean
+  requiresGuild?: boolean
+  requiresVoiceChannel?: boolean
+  requiresTextChannel?: boolean
+  options?: CommandOption[]
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Command Execution
-// ─────────────────────────────────────────────────────────────────────────────
-
-export type ExecutionStatus = 'pending' | 'running' | 'success' | 'error'
-
-export interface ExecutionResult {
-  id: string
-  command: string
-  args: Record<string, unknown>
-  status: ExecutionStatus
-  output?: string
-  error?: string
-  startedAt: string
-  completedAt?: string
-  durationMs?: number
+export interface CommandOption {
+  name: string
+  type: string
+  description?: string
+  required?: boolean
+  choices?: { name: string; value: string }[]
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System & Metrics
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── System ──────────────────────────────────────────────────────────────────
 
 export interface SystemHealth {
-  status: SystemStatus
-  uptime: number // seconds
-  version: string
-  components: {
-    name: string
-    status: SystemStatus
-    latency?: number // ms
-    message?: string
-  }[]
+  status: "online" | "offline" | "degraded" | "healthy"
+  uptime?: number
+  version?: string
+  botReady?: boolean
+  schedulerRunning?: boolean
+  apiStatus?: string
+  timestamp?: string
+  // Extended fields that may come from the bot API
+  apiResponseTime?: number
+  memoryUsage?: string
+  connections?: number
+  voiceHealth?: boolean
 }
 
-export interface BotMetrics {
-  guilds: number
-  users: number
-  activeSessions: number
-  commandsToday: number
-  messagesProcessed: number
-  voiceMinutesToday: number
-  cpuUsage: number
-  memoryUsage: number
-  latency: number
+export interface DatabaseStatus {
+  connected: boolean
+  path?: string
+  tables?: DatabaseTable[]
+  size?: number
+  error?: string
 }
 
-export interface TimeSeriesPoint {
-  time: string
-  value: number
-}
-
-export interface ActivityDataPoint {
-  day: string
-  participants: number
-  sessions: number
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// System Controls
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface SystemToggle {
-  id: string
+export interface DatabaseTable {
   name: string
-  description: string
-  enabled: boolean
-  category: 'features' | 'security' | 'logging' | 'performance'
+  rowCount?: number
 }
 
-export interface BotStatus {
-  isOnline: boolean
-  currentStatus: 'online' | 'idle' | 'dnd' | 'invisible'
-  activityType: 'playing' | 'listening' | 'watching' | 'competing' | 'custom'
-  activityText: string
+// ─── API Response ─────────────────────────────────────────────────────────────
+
+export interface ApiResponse<T = unknown> {
+  ok: boolean
+  data?: T
+  error?: string
+  details?: string
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// API Response Wrappers
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Log Entry ────────────────────────────────────────────────────────────────
 
-export interface ApiResponse<T> {
-  data: T
+export interface LogEntry {
+  id?: string
   timestamp: string
-  cached?: boolean
-}
-
-export interface PaginatedResponse<T> {
-  data: T[]
-  total: number
-  page: number
-  pageSize: number
-  hasMore: boolean
-}
-
-export interface ApiError {
-  code: string
+  level: "info" | "warn" | "error" | "debug" | "warning"
   message: string
-  details?: Record<string, unknown>
+  context?: string
+  source?: string
+  event?: string
+  details?: string
+  metadata?: Record<string, unknown>
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WebSocket Events (for future real-time)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export type WSEventType =
-  | 'log'
-  | 'session_update'
-  | 'metrics_update'
-  | 'command_executed'
-  | 'user_activity'
-  | 'system_alert'
-
-export interface WSEvent<T = unknown> {
-  type: WSEventType
-  payload: T
-  timestamp: string
-}
+// BotLog is an alias for LogEntry (used by the logs page)
+export type BotLog = LogEntry

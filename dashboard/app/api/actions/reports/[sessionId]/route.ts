@@ -1,41 +1,33 @@
-// dashboard/app/api/actions/reports/[sessionId]/route.ts
-import { NextResponse } from 'next/server';
-
-const BOT_API_URL = process.env.BOT_API_URL || 'http://127.0.0.1:4000/api';
-const BOT_API_KEY = process.env.BOT_API_KEY || 'local_dashboard_key_123';
+import { NextResponse } from "next/server"
+import { botGet } from "@/lib/server/botApi"
+import { mapReportDetail } from "@/lib/server/botMappers"
 
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ sessionId: string }> }
+  context: { params: Promise<{ sessionId: string }> }
 ) {
-  try {
-    const { sessionId } = await params;
-    const res = await fetch(`${BOT_API_URL}/actions/reports/${sessionId}`, {
-      headers: { 'x-api-key': BOT_API_KEY },
-      cache: 'no-store'
-    });
-    const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Bot offline' }, { status: 503 });
-  }
-}
+  const { sessionId } = await context.params
+  const result = await botGet<{ ok?: boolean; report?: Record<string, unknown>; error?: string }>(
+    `/actions/reports/${sessionId}`
+  )
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ sessionId: string }> }
-) {
-  try {
-    const { sessionId } = await params;
-    const body = await request.json();
-    const res = await fetch(`${BOT_API_URL}/actions/session/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': BOT_API_KEY },
-      body: JSON.stringify({ sessionId: Number(sessionId), ...body })
-    });
-    const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Bot offline' }, { status: 503 });
+  if (!result.ok) {
+    return NextResponse.json({
+      ok: false,
+      error: result.error ?? "Bot API is offline",
+      data: null,
+    })
   }
+
+  const inner = result.data
+  if (!inner?.ok || !inner.report) {
+    return NextResponse.json({
+      ok: false,
+      error: typeof inner?.error === "string" ? inner.error : "No report generated yet",
+      data: null,
+    })
+  }
+
+  const detail = mapReportDetail(inner.report as Record<string, unknown>)
+  return NextResponse.json({ ok: true, data: detail })
 }

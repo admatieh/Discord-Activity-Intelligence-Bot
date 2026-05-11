@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/session/scheduled.js
 // Usage: !scheduled [--type session|message] [--status scheduled|completed|failed|cancelled]
 
@@ -8,6 +9,7 @@ module.exports = {
     description: 'List scheduled items (sessions and messages).',
     usage: '!scheduled [--type session|message] [--status scheduled]',
     category: 'session',
+    requiredPermission: 'instructor',
     aliases: ['schedule-list'],
     supportsDashboard: true,
     options: [
@@ -16,6 +18,9 @@ module.exports = {
     ],
 
     async execute(message, args, context) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         const items = schedulerService.getScheduledItems({
             type: args.type || null,
             status: args.status || 'scheduled',

@@ -1,29 +1,19 @@
-// dashboard/app/api/discord/guilds/route.ts
-import { NextResponse } from 'next/server';
-
-const BOT_API_URL = process.env.BOT_API_URL || 'http://127.0.0.1:4000/api';
-const BOT_API_KEY = process.env.BOT_API_KEY || 'local_dashboard_key_123';
+import { NextResponse } from "next/server"
+import { botGet } from "@/lib/server/botApi"
 
 export async function GET() {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-
-    const res = await fetch(`${BOT_API_URL}/discord/guilds`, {
-      headers: { 'x-api-key': BOT_API_KEY },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-
-    if (!res.ok) throw new Error(`Bot API ${res.status}`);
-    const data = await res.json();
-    return NextResponse.json(data);
-  } catch (error: any) {
-    const offline = error.name === 'AbortError' || error.code === 'ECONNREFUSED';
+  const result = await botGet<{ ok?: boolean; guilds?: unknown[]; error?: string }>(
+    "/discord/guilds"
+  )
+  if (!result.ok) {
     return NextResponse.json({
       ok: false,
-      error: offline ? 'Bot API offline' : error.message,
-      guilds: []
-    }, { status: offline ? 503 : 500 });
+      error: result.error ?? "Bot API is offline",
+      details: result.details,
+      data: [],
+    })
   }
+  const payload = result.data
+  const guilds = Array.isArray(payload?.guilds) ? payload.guilds : []
+  return NextResponse.json({ ok: true, data: guilds })
 }

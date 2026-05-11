@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/session/session-debug.js
 //
 // Low-level debug dump of a session — raw DB fields + integrity metrics.
@@ -13,11 +14,11 @@ const sessionModel       = require('../../models/sessionModel');
 const voiceActivityModel = require('../../models/voiceActivityModel');
 const attendanceModel    = require('../../models/attendanceModel');
 const { resolveSessionContext } = require('../../utils/commandResolver');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 module.exports = {
     name: 'session-debug',
+    requiredPermission: 'instructor',
     description: 'Raw debug dump of a session (instructor only).',
     usage: '!session-debug [--id <n>] [--channel <#ch>] [--latest]',
     options: [
@@ -26,12 +27,12 @@ module.exports = {
         { name: 'latest',  type: 'boolean', required: false, description: 'Use most recent session' }
     ],
 
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
             const ctx     = resolveSessionContext(message, options);

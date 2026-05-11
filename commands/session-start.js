@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../utils/permissions');
 // commands/session-start.js
 //
 // Start a voice tracking session with named arguments.
@@ -6,12 +7,12 @@
 
 const sessionService = require('../modules/sessions/sessionService');
 const { DEFAULT_SESSION_DURATION } = require('../config/constants');
-const { checkInstructor } = require('../utils/permissions');
 const logger = require('../utils/logger');
 
 module.exports = {
     name: 'session-start',
     category: 'session',
+    requiredPermission: 'instructor',
     aliases: ['start'],
     description: 'Start a voice tracking session in a channel.',
     usage: '!session-start --duration <minutes> --channel <#channel>',
@@ -19,14 +20,14 @@ module.exports = {
         { name: 'duration', type: 'number', required: false, description: 'Session length in minutes (default: 60)' },
         { name: 'channel', type: 'channel', required: false, description: 'Target voice channel (default: your current voice channel)' }
     ],
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) {
                 return message.reply('❌ Server only.');
             }
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
 

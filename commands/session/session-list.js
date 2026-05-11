@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/session/session-list.js
 //
 // List sessions with optional filtering.
@@ -9,25 +10,25 @@
 // ---------------------------------------------------------------------------
 
 const sessionModel = require('../../models/sessionModel');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 const MAX_ROWS = 15;
 
 module.exports = {
     name: 'session-list',
+    requiredPermission: 'instructor',
     description: 'List recent or active sessions.',
     usage: '!session-list [--view all|open]',
     options: [
         { name: 'view', type: 'string', required: false, description: '"open" for active sessions only, "all" for recent history' }
     ],
 
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
             const view    = (options.view || 'all').toLowerCase();

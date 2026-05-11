@@ -1,3 +1,4 @@
+const { requireBotAdmin } = require('../../utils/permissions');
 const { checkBotAdmin, getInstructorRole } = require('../../utils/permissions');
 const { resolveUserContext } = require('../../utils/commandResolver');
 const logger = require('../../utils/logger');
@@ -15,11 +16,11 @@ module.exports = {
     ],
 
     async execute(message, args, { parsed } = {}) {
+        const permission = await requireBotAdmin(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkBotAdmin(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || args || {};
             const userCtx = resolveUserContext(message, options);

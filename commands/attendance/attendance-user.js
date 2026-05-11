@@ -1,3 +1,5 @@
+const { sendResponse } = require('../../utils/responseHelper');
+const { requireInstructor } = require('../../utils/permissions');
 // commands/attendance/attendance-user.js
 //
 // Show all attendance records across sessions for a specific user.
@@ -8,7 +10,6 @@
 
 const attendanceSummaryModel = require('../../models/attendanceSummaryModel');
 const { resolveUserContext } = require('../../utils/commandResolver');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 const { COMMAND_LIMITS } = require('../../config/constants');
 
@@ -21,28 +22,32 @@ const STATUS_EMOJI = {
 
 module.exports = {
     name: 'attendance-user',
+    requiredPermission: 'instructor',
     description: "Show a user's attendance history across all sessions.",
     usage: '!attendance-user --user <@mention|id>',
     options: [
-        { name: 'user', type: 'string', required: true, description: 'User mention or ID' }
+{ name: 'user', type: 'string', required: true, description: 'User mention or ID' },
+        { name: 'private', type: 'boolean', required: false, description: 'Send the response privately by DM' },
+        { name: 'quiet', type: 'boolean', required: false, description: 'Only send a short confirmation' },
+        { name: 'silent', type: 'boolean', required: false, description: 'Do not send a public response' }
     ],
 
-    execute(message, _args, { parsed } = {}) {
-        try {
-            if (!message.guild) return message.reply('❌ Server only.');
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
 
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
+        try {
+            if (!message.guild) return sendResponse(message, '❌ Server only.', parsed?.options || {});
 
             const options = parsed?.options || {};
             const userCtx = resolveUserContext(message, options);
 
-            if (userCtx.error) return message.reply(userCtx.error);
+            if (userCtx.error) return sendResponse(message, userCtx.error, parsed?.options || {});
 
             const records = attendanceSummaryModel.getByUser(userCtx.userId);
 
             if (!records || records.length === 0) {
-                return message.reply(`⚠️ No attendance records found for <@${userCtx.userId}>.`);
+                return sendResponse(message, `⚠️ No attendance records found for <@${userCtx.userId}>.`, parsed?.options || {});
             }
 
             const limit     = COMMAND_LIMITS.DEFAULT;
@@ -69,10 +74,10 @@ module.exports = {
             output    += `\`\`\`\n${header}\n${divider}\n${lines.join('\n')}\n\`\`\``;
             if (truncated) output += `\n_Showing ${limit} of ${records.length} records (most recent first)._`;
 
-            return message.reply(output);
+            return sendResponse(message, output, parsed?.options || {});
         } catch (error) {
             logger.error(`attendance-user command error: ${error.message}`, { error: error.message });
-            return message.reply('❌ An error occurred while fetching user attendance.');
+            return sendResponse(message, '❌ An error occurred while fetching user attendance.', parsed?.options || {});
         }
     }
 };

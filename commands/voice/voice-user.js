@@ -1,3 +1,5 @@
+const { sendResponse } = require('../../utils/responseHelper');
+const { requireInstructor } = require('../../utils/permissions');
 // commands/voice/voice-user.js
 //
 // Show all voice intervals for a specific user in a session.
@@ -8,39 +10,42 @@
 
 const voiceActivityModel = require('../../models/voiceActivityModel');
 const { resolveSessionContext, resolveUserContext } = require('../../utils/commandResolver');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 const { COMMAND_LIMITS } = require('../../config/constants');
 
 module.exports = {
     name: 'voice-user',
+    requiredPermission: 'instructor',
     description: "Show all voice intervals for a specific user in a session.",
     usage: '!voice-user --user <@mention|id> [--id <n>] [--channel <#ch>] [--latest]',
     options: [
-        { name: 'user',    type: 'string',  required: true,  description: 'User mention or ID' },
+{ name: 'user',    type: 'string',  required: true,  description: 'User mention or ID' },
         { name: 'id',      type: 'number',  required: false, description: 'Session ID' },
         { name: 'channel', type: 'channel', required: false, description: 'Voice channel' },
-        { name: 'latest',  type: 'boolean', required: false, description: 'Use most recent session' }
+        { name: 'latest',  type: 'boolean', required: false, description: 'Use most recent session' },
+        { name: 'private', type: 'boolean', required: false, description: 'Send the response privately by DM' },
+        { name: 'quiet', type: 'boolean', required: false, description: 'Only send a short confirmation' },
+        { name: 'silent', type: 'boolean', required: false, description: 'Do not send a public response' }
     ],
 
-    execute(message, _args, { parsed } = {}) {
-        try {
-            if (!message.guild) return message.reply('❌ Server only.');
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
 
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
+        try {
+            if (!message.guild) return sendResponse(message, '❌ Server only.', parsed?.options || {});
 
             const options = parsed?.options || {};
             const ctx     = resolveSessionContext(message, options);
             const userCtx = resolveUserContext(message, options);
 
-            if (ctx.error)     return message.reply(ctx.error);
-            if (userCtx.error) return message.reply(userCtx.error);
+            if (ctx.error)     return sendResponse(message, ctx.error, parsed?.options || {});
+            if (userCtx.error) return sendResponse(message, userCtx.error, parsed?.options || {});
 
             const intervals = voiceActivityModel.getIntervalsBySessionAndUser(ctx.sessionId, userCtx.userId);
 
             if (!intervals || intervals.length === 0) {
-                return message.reply(`⚠️ No voice intervals found for <@${userCtx.userId}> in Session #${ctx.sessionId}.`);
+                return sendResponse(message, `⚠️ No voice intervals found for <@${userCtx.userId}> in Session #${ctx.sessionId}.`, parsed?.options || {});
             }
 
             const limit     = COMMAND_LIMITS.DEFAULT;
@@ -64,10 +69,10 @@ module.exports = {
             output    += `\`\`\`\n${lines.join('\n')}\n\`\`\``;
             if (truncated) output += `\n_Showing ${limit} of ${intervals.length} intervals._`;
 
-            return message.reply(output);
+            return sendResponse(message, output, parsed?.options || {});
         } catch (error) {
             logger.error(`voice-user command error: ${error.message}`, { error: error.message });
-            return message.reply('❌ An error occurred while fetching user voice intervals.');
+            return sendResponse(message, '❌ An error occurred while fetching user voice intervals.', parsed?.options || {});
         }
     }
 };

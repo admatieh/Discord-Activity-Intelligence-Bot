@@ -1,3 +1,5 @@
+const { sendResponse } = require('../../utils/responseHelper');
+const { requireInstructor } = require('../../utils/permissions');
 // commands/interaction/schedule-message.js
 // Usage:
 // !schedule-message --channel <textChannelId> --at "tomorrow 9 AM" --content "Reminder: session starts soon."
@@ -11,18 +13,25 @@ module.exports = {
     description: 'Schedule a message to be sent to a text channel at a future time.',
     usage: '!schedule-message --channel <textChannelId> --at "<time>" [or --in "<relative time>"] --content "<text>"',
     category: 'interaction',
+    requiredPermission: 'instructor',
     aliases: ['sched-msg'],
     supportsDashboard: true,
     requiresGuild: true,
     requiresTextChannel: true,
     options: [
-        { name: 'channel', type: 'string', required: true, description: 'Text channel ID' },
+{ name: 'channel', type: 'string', required: true, description: 'Text channel ID' },
         { name: 'at', type: 'string', required: false, description: 'Time (e.g. "today 10:10 AM", "tomorrow 2:30 PM", or ISO)' },
         { name: 'in', type: 'string', required: false, description: 'Relative time (e.g. "30m", "1h 30m")' },
-        { name: 'content', type: 'string', required: true, description: 'Message content (max 2000 chars)' }
+        { name: 'content', type: 'string', required: true, description: 'Message content (max 2000 chars)' },
+        { name: 'private', type: 'boolean', required: false, description: 'Send the response privately by DM' },
+        { name: 'quiet', type: 'boolean', required: false, description: 'Only send a short confirmation' },
+        { name: 'silent', type: 'boolean', required: false, description: 'Do not send a public response' }
     ],
 
     async execute(message, args, context) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         let textChannelId = args.channel;
         if (typeof textChannelId === 'object' && textChannelId !== null) textChannelId = textChannelId.id;
         else if (textChannelId) textChannelId = String(textChannelId).replace(/[<#>]/g, '');

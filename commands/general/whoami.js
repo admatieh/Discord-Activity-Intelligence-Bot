@@ -1,5 +1,3 @@
-const { checkBotAdmin, checkInstructor } = require('../../utils/permissions');
-
 module.exports = {
     name: 'whoami',
     description: 'Show your current role and permissions.',
@@ -13,7 +11,7 @@ module.exports = {
         const displayName = member?.displayName || message.author?.username || 'Unknown';
         const userId = message.author?.id || 'Unknown';
         const guildName = message.guild?.name || 'Unknown Server';
-
+        const { checkInstructor, checkBotAdmin } = require('../../utils/permissions');
         const adminCheck = checkBotAdmin(member);
         const instructorCheck = checkInstructor(member);
 

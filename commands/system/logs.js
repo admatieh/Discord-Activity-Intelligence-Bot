@@ -1,3 +1,5 @@
+const { sendResponse } = require('../../utils/responseHelper');
+const { requireInstructor } = require('../../utils/permissions');
 // commands/system/logs.js
 //
 // Query recent entries from the logs table in the database.
@@ -12,7 +14,6 @@
 // ---------------------------------------------------------------------------
 
 const db = require('../../database/db');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 const { sendSplitMessage } = require('../../utils/messageSender');
 
@@ -28,26 +29,30 @@ const LEVEL_EMOJI = {
 
 module.exports = {
     name: 'logs',
+    requiredPermission: 'instructor',
     description: 'Query recent log entries from the database (instructor only).',
     usage: '!logs [--level error|warn|info] [--limit <n>]',
     options: [
-        { name: 'level', type: 'string', required: false, description: 'Filter by log level: error | warn | info' },
-        { name: 'limit', type: 'number', required: false, description: `Number of entries to show (default: ${DEFAULT_LIMIT}, max: ${MAX_LIMIT})` }
+{ name: 'level', type: 'string', required: false, description: 'Filter by log level: error | warn | info' },
+        { name: 'limit', type: 'number', required: false, description: `Number of entries to show (default: ${DEFAULT_LIMIT}, max: ${MAX_LIMIT})` },
+        { name: 'private', type: 'boolean', required: false, description: 'Send the response privately by DM' },
+        { name: 'quiet', type: 'boolean', required: false, description: 'Only send a short confirmation' },
+        { name: 'silent', type: 'boolean', required: false, description: 'Do not send a public response' }
     ],
 
     async execute(message, _args, { parsed } = {}) {
-        try {
-            if (!message.guild) return message.reply('❌ Server only.');
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
 
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
+        try {
+            if (!message.guild) return sendResponse(message, '❌ Server only.', parsed?.options || {});
 
             const options = parsed?.options || {};
 
             // Validate --level
             const level = options.level ? String(options.level).toLowerCase() : null;
             if (level && !VALID_LEVELS.has(level)) {
-                return message.reply(`❌ Invalid level "${level}". Use: error | warn | info`);
+                return sendResponse(message, `❌ Invalid level "${level}". Use: error | warn | info`, parsed?.options || {});
             }
 
             // Validate --limit
@@ -70,7 +75,7 @@ module.exports = {
 
             if (!rows || rows.length === 0) {
                 const levelStr = level ? ` with level "${level}"` : '';
-                return message.reply(`⚠️ No log entries found${levelStr}.`);
+                return sendResponse(message, `⚠️ No log entries found${levelStr}.`, parsed?.options || {});
             }
 
             const lines = rows.map(row => {
@@ -86,7 +91,7 @@ module.exports = {
             return sendSplitMessage(message, title, lines, { useCodeBlock: true });
         } catch (error) {
             logger.error(`logs command error: ${error.message}`, { error: error.message });
-            return message.reply('❌ An error occurred while querying logs.');
+            return sendResponse(message, '❌ An error occurred while querying logs.', parsed?.options || {});
         }
     }
 };

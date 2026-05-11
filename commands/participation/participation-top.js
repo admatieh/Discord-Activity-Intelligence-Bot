@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/participation/participation-top.js
 //
 // Top N participants by score for a session.
@@ -8,7 +9,6 @@
 
 const participationSummaryModel = require('../../models/participationSummaryModel');
 const { resolveSessionContext } = require('../../utils/commandResolver');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 const { COMMAND_LIMITS } = require('../../config/constants');
 
@@ -16,6 +16,7 @@ const MEDAL = ['🥇', '🥈', '🥉'];
 
 module.exports = {
     name: 'participation-top',
+    requiredPermission: 'instructor',
     description: 'Show top N participants by score for a session.',
     usage: '!participation-top [--id <n>] [--channel <#ch>] [--latest] [--limit <n>]',
     options: [
@@ -25,12 +26,12 @@ module.exports = {
         { name: 'limit', type: 'number', required: false, description: `Number of results (default: ${COMMAND_LIMITS.DEFAULT}, max: ${COMMAND_LIMITS.MAX})` }
     ],
 
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
             const ctx = resolveSessionContext(message, options);

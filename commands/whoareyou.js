@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../utils/permissions');
 // commands/whoareyou.js
 
 const logger = require('../utils/logger');
@@ -5,10 +6,12 @@ const logger = require('../utils/logger');
 module.exports = {
     name: 'whoareyou',
     category: 'general',
+    requiredPermission: 'public',
     description: 'Learn what this bot does.',
     usage: '!whoareyou',
     options: [],
-    execute(message) {
+    async execute(message) {
+
         try {
             return message.reply(
                 "I am a Discord-based bot created by Adam Abo Atieh that automatically monitors live sessions, " +

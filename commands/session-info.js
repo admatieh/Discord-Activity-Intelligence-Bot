@@ -1,3 +1,5 @@
+const { sendResponse } = require('utils/responseHelper');
+const { requireInstructor } = require('../utils/permissions');
 // commands/session-info.js
 //
 // Display session information with named arguments.
@@ -16,17 +18,24 @@ const { sendSplitMessage } = require('../utils/messageSender');
 module.exports = {
     name: 'session-info',
     category: 'session',
+    requiredPermission: 'instructor',
     aliases: ['info'],
     description: 'View details about sessions (all, active, or specific).',
     usage: '!session-info [--view all|open] [--id <sessionId>]',
     options: [
         { name: 'view', type: 'string', required: false, description: '"all" for all sessions, "open" for active sessions only' },
-        { name: 'id', type: 'number', required: false, description: 'Specific session ID for detailed info' }
+        { name: 'id', type: 'number', required: false, description: 'Specific session ID for detailed info' },
+        { name: 'private', type: 'boolean', required: false, description: 'Send the response privately by DM' },
+        { name: 'quiet', type: 'boolean', required: false, description: 'Only send a short confirmation' },
+        { name: 'silent', type: 'boolean', required: false, description: 'Do not send a public response' }
     ],
     async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) {
-                return message.reply('❌ Server only.');
+                return sendResponse(message, '❌ Server only.', parsed?.options || {});
             }
 
             const options = parsed?.options || {};
@@ -35,7 +44,7 @@ module.exports = {
             if (options.view === 'all') {
                 const sessions = sessionModel.getAllSessions();
                 if (sessions.length === 0) {
-                    return message.reply('📋 No sessions found.');
+                    return sendResponse(message, '📋 No sessions found.', parsed?.options || {});
                 }
                 const lines = sessions.map(s => {
                     const status = s.end_time ? '🔴 Ended' : '🟢 Active';
@@ -49,7 +58,7 @@ module.exports = {
             if (options.view === 'open') {
                 const sessions = sessionModel.getActiveSessions();
                 if (sessions.length === 0) {
-                    return message.reply('📋 No active sessions.');
+                    return sendResponse(message, '📋 No active sessions.', parsed?.options || {});
                 }
                 const lines = sessions.map(s =>
                     `**#${s.id}** | Channel: ${s.channel_id} | Started: ${s.start_time} | Auto-end: ${s.auto_end_at}`
@@ -62,7 +71,7 @@ module.exports = {
             if (options.id !== undefined) {
                 const sessionId = Number(options.id);
                 if (isNaN(sessionId)) {
-                    return message.reply('❌ Session ID must be a number.');
+                    return sendResponse(message, '❌ Session ID must be a number.', parsed?.options || {});
                 }
                 return replySessionDetail(message, sessionId);
             }
@@ -76,12 +85,12 @@ module.exports = {
                 }
             }
 
-            return message.reply(
+            return sendResponse(message,
                 'ℹ️ Usage: `!session-info --view all` | `!session-info --view open` | `!session-info --id <id>`'
-            );
+                , parsed?.options || {});
         } catch (error) {
             logger.error(`session-info command error: ${error.message}`, { error: error.message });
-            return message.reply('❌ An error occurred while retrieving session info.');
+            return sendResponse(message, '❌ An error occurred while retrieving session info.', parsed?.options || {});
         }
     }
 };
@@ -93,7 +102,7 @@ module.exports = {
 function replySessionDetail(message, sessionId) {
     const info = sessionService.getSessionInfo(sessionId);
     if (!info) {
-        return message.reply('❌ Session not found.');
+        return sendResponse(message, '❌ Session not found.', parsed?.options || {});
     }
     const status = info.end_time ? '🔴 Ended' : '🟢 Active';
     const lines = [

@@ -1,3 +1,5 @@
+const { sendResponse } = require('../../utils/responseHelper');
+const { requireInstructor } = require('../../utils/permissions');
 // commands/system/db-stats.js
 //
 // Show row counts for all major database tables.
@@ -9,7 +11,6 @@
 // ---------------------------------------------------------------------------
 
 const db = require('../../database/db');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 // Table definitions: [emoji, table_name, display_label]
@@ -27,16 +28,22 @@ const TABLES = [
 
 module.exports = {
     name: 'db-stats',
+    requiredPermission: 'instructor',
     description: 'Show row counts for all major database tables (instructor only).',
     usage: '!db-stats',
-    options: [],
+    options: [
 
-    execute(message, _args, { parsed } = {}) {
+        { name: 'private', type: 'boolean', required: false, description: 'Send the response privately by DM' },
+        { name: 'quiet', type: 'boolean', required: false, description: 'Only send a short confirmation' },
+        { name: 'silent', type: 'boolean', required: false, description: 'Do not send a public response' }
+    ],
+
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
-            if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
+            if (!message.guild) return sendResponse(message, '❌ Server only.', parsed?.options || {});
 
             const results = [];
             let totalRows = 0;
@@ -70,10 +77,10 @@ module.exports = {
             let output = `🗄️ **Database Stats**\n`;
             output    += `\`\`\`\n${header}\n${divider}\n${lines.join('\n')}\n${divider}\n${footer}\n\`\`\``;
 
-            return message.reply(output);
+            return sendResponse(message, output, parsed?.options || {});
         } catch (error) {
             logger.error(`db-stats command error: ${error.message}`, { error: error.message });
-            return message.reply('❌ An error occurred while querying database stats.');
+            return sendResponse(message, '❌ An error occurred while querying database stats.', parsed?.options || {});
         }
     }
 };

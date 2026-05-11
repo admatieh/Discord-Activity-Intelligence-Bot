@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/participation/participation-low.js
 //
 // Bottom N participants by score for a session (lowest engagement).
@@ -8,7 +9,6 @@
 
 const participationSummaryModel = require('../../models/participationSummaryModel');
 const { resolveSessionContext } = require('../../utils/commandResolver');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 const DEFAULT_LIMIT = 5;
@@ -16,6 +16,7 @@ const MAX_LIMIT     = 15;
 
 module.exports = {
     name: 'participation-low',
+    requiredPermission: 'instructor',
     description: 'Show bottom N participants by score for a session (lowest engagement).',
     usage: '!participation-low [--id <n>] [--channel <#ch>] [--latest] [--limit <n>]',
     options: [
@@ -25,12 +26,12 @@ module.exports = {
         { name: 'limit',   type: 'number',  required: false, description: `Number of results (default: ${DEFAULT_LIMIT}, max: ${MAX_LIMIT})` }
     ],
 
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
             const ctx     = resolveSessionContext(message, options);

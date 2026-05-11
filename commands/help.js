@@ -16,6 +16,7 @@ const MAX_PER_CATEGORY = 15;
 module.exports = {
     name: 'help',
     category: 'general',
+    requiredPermission: 'public',
     aliases: ['h', 'commands'],
     description: 'Show a list of all commands or details about a specific command/category.',
     usage: '!help [--category <name>] [--command <name>]',
@@ -29,9 +30,9 @@ module.exports = {
                 return message.reply('❌ Help system unavailable.');
             }
 
-            const { checkInstructor } = require('../utils/permissions');
-            const perm = checkInstructor(message.member);
-            const isInstructor = perm.allowed;
+            const { checkInstructor, checkBotAdmin } = require('../utils/permissions');
+            const isInstructor = checkInstructor(message.member).allowed;
+            const isAdmin = checkBotAdmin(message.member).allowed;
 
             const options = parsed?.options || {};
             const targetCommand = options.command || (parsed?.positional?.[0]);
@@ -41,10 +42,9 @@ module.exports = {
             const uniqueCommands = new Set();
             for (const [key, cmd] of commands.entries()) {
                 if (key === cmd.name.toLowerCase()) {
-                    // Filter out commands that require instructor perms if user is public
-                    if (!isInstructor && cmd.requiredPermission !== 'public') {
-                        continue;
-                    }
+                    // Filter out commands based on permissions
+                    if (!isInstructor && cmd.requiredPermission !== 'public') continue;
+                    if (!isAdmin && cmd.requiredPermission === 'admin') continue;
                     uniqueCommands.add(cmd);
                 }
             }
@@ -52,7 +52,8 @@ module.exports = {
             // 1. Detailed help for a specific command
             if (targetCommand) {
                 const cmd = commands.get(targetCommand.toLowerCase());
-                if (!cmd || (!isInstructor && cmd.requiredPermission !== 'public')) {
+                const isHidden = !cmd || (!isInstructor && cmd.requiredPermission !== 'public') || (!isAdmin && cmd.requiredPermission === 'admin');
+                if (isHidden) {
                     return message.reply(`❌ Command not found: \`${targetCommand}\`.`);
                 }
                 return message.reply(formatCommandDetail(cmd));

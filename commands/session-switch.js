@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../utils/permissions');
 // commands/session-switch.js
 //
 // Switch an active session to a different voice channel.
@@ -8,26 +9,26 @@
 
 const sessionService = require('../modules/sessions/sessionService');
 const sessionModel = require('../models/sessionModel');
-const { checkInstructor } = require('../utils/permissions');
 const logger = require('../utils/logger');
 
 module.exports = {
     name: 'session-switch',
     category: 'session',
+    requiredPermission: 'instructor',
     aliases: ['switch'],
     description: 'Move an active session to a different voice channel.',
     usage: '!session-switch --channel <#channel>',
     options: [
         { name: 'channel', type: 'channel', required: false, description: 'Target voice channel to switch to (default: your current voice channel)' }
     ],
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) {
                 return message.reply('❌ Server only.');
             }
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
 

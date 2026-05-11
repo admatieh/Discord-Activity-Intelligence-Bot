@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/participation/participation.js
 //
 // Full participation table for a session, sorted by score DESC.
@@ -11,7 +12,6 @@
 
 const participationSummaryModel = require('../../models/participationSummaryModel');
 const { resolveSessionContext } = require('../../utils/commandResolver');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 const MAX_ROWS = 15;
@@ -27,6 +27,7 @@ const LABEL_EMOJI = {
 module.exports = {
     name: 'participation',
     category: 'participation',
+    requiredPermission: 'instructor',
     aliases: ['part'],
     description: 'Show full participation scores for a session (sorted by score DESC).',
     usage: '!participation [--id <n>] [--channel <#ch>] [--latest]',
@@ -36,12 +37,12 @@ module.exports = {
         { name: 'latest',  type: 'boolean', required: false, description: 'Use most recent session' }
     ],
 
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
             const ctx     = resolveSessionContext(message, options);

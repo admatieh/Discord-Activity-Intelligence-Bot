@@ -1,213 +1,329 @@
-'use client'
+"use client"
 
-import { useState, useEffect, useMemo } from 'react'
-import { Topbar } from '@/components/dashboard/topbar'
-import { cn } from '@/lib/utils'
-import { Users, Mic, MessageSquare, CheckCircle, Search, Loader2, RefreshCw, Calendar, Activity } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from "react"
+import {
+  Users,
+  Search,
+  RefreshCw,
+  Timer,
+  MessageSquare,
+  Volume2,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import PageHeader from "@/components/layout/PageHeader"
+import StatusBadge from "@/components/ui/status-badge"
+import EmptyState from "@/components/states/EmptyState"
+import ErrorPanel from "@/components/states/ErrorPanel"
+import LoadingState from "@/components/states/LoadingState"
+import { apiFetch, formatTimeAgo, formatDuration, safeArray } from "@/lib/helpers"
+import type { Guild, Participant } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
-function UserDetail({ user }: { user: any }) {
+type FilterType = "all" | "in-voice" | "tracked"
+
+const FILTERS: { label: string; value: FilterType }[] = [
+  { label: "All", value: "all" },
+  { label: "In voice", value: "in-voice" },
+  { label: "Tracked", value: "tracked" },
+]
+
+export default function ParticipantsPage() {
+  const [guilds, setGuilds] = useState<Guild[]>([])
+  const [guildId, setGuildId] = useState("")
+  const [participants, setParticipants] = useState<Participant[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [search, setSearch] = useState("")
+  const [filter, setFilter] = useState<FilterType>("all")
+  const [selected, setSelected] = useState<Participant | null>(null)
+
+  useEffect(() => {
+    async function loadGuilds() {
+      const res = await apiFetch<Guild[]>("/api/discord/guilds")
+      if (res.ok) {
+        const arr = safeArray<Guild>(res.data)
+        setGuilds(arr)
+        if (arr.length === 1) setGuildId(arr[0].id)
+      }
+    }
+    void loadGuilds()
+  }, [])
+
+  const load = useCallback(
+    async (isRefresh = false) => {
+      if (!guildId) {
+        setParticipants([])
+        setLoading(false)
+        setRefreshing(false)
+        return
+      }
+      if (isRefresh) setRefreshing(true)
+      else setLoading(true)
+      const res = await apiFetch<Participant[]>(`/api/participants?guildId=${encodeURIComponent(guildId)}`)
+      if (res.ok) {
+        const raw = safeArray<Participant>(res.data)
+        setParticipants(raw.filter((p) => !p.isBot))
+        setError(null)
+      } else {
+        setError(res.error ?? "Could not load participants.")
+      }
+      setLoading(false)
+      setRefreshing(false)
+    },
+    [guildId]
+  )
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const filtered = useMemo(() => {
+    let list = participants
+    if (filter === "in-voice") list = list.filter((p) => p.currentVoiceChannel)
+    if (filter === "tracked") list = list.filter((p) => (p.sessionsAttended ?? 0) > 0)
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(
+        (p) =>
+          (p.username ?? "").toLowerCase().includes(q) ||
+          (p.displayName ?? "").toLowerCase().includes(q) ||
+          (p.userId ?? "").includes(q)
+      )
+    }
+    return list
+  }, [participants, filter, search])
+
   return (
-    <div className="flex flex-col h-full overflow-y-auto p-6 space-y-6">
-      <div className="bg-card border border-border rounded-xl shadow-sm p-6">
-        <div className="flex items-start gap-5">
-          <div className="w-14 h-14 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-            <span className="text-xl font-bold text-primary">
-              {(user.displayName || user.username || '?')[0]?.toUpperCase()}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-semibold">{user.displayName || user.username}</h2>
-              {user.inVoice && (
-                <span className="bg-status-online/10 text-status-online text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-status-online rounded-full"></span>
-                  In Voice
-                </span>
+    <div className="p-6 max-w-5xl mx-auto">
+      <PageHeader
+        title="Participants"
+        description="Tracked users and their activity across sessions."
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => load(true)}
+            disabled={refreshing}
+            className="gap-1.5"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+            Refresh
+          </Button>
+        }
+      />
+
+      <p className="text-sm text-muted-foreground mb-4 rounded-lg border border-border bg-accent/20 px-4 py-3">
+        Live Discord members for the selected server. Tracked session stats appear when the bot has recorded activity for those users.
+      </p>
+
+      {/* Controls */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center mb-5">
+        <div className="space-y-1.5 min-w-[200px]">
+          <Label className="text-xs text-muted-foreground">Discord server</Label>
+          <Select value={guildId} onValueChange={setGuildId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select a server…" />
+            </SelectTrigger>
+            <SelectContent>
+              {guilds.map((g) => (
+                <SelectItem key={g.id} value={g.id}>
+                  {g.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search participants…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+            disabled={!guildId}
+          />
+        </div>
+        <div className="flex gap-2">
+          {FILTERS.map((f) => (
+            <button
+              key={f.value}
+              onClick={() => setFilter(f.value)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                filter === f.value
+                  ? "border-primary bg-accent text-primary"
+                  : "border-border bg-card text-muted-foreground hover:bg-muted"
               )}
-            </div>
-            <p className="text-sm text-muted-foreground mt-1">
-              @{user.username}
-            </p>
-          </div>
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Voice Time', value: Math.round(user.totalVoiceMinutes || 0), unit: 'min', icon: Mic, color: 'text-chart-3', bg: 'bg-chart-3/10' },
-          { label: 'Messages', value: user.messageCount || 0, icon: MessageSquare, color: 'text-chart-2', bg: 'bg-chart-2/10' },
-          { label: 'Sessions', value: user.sessionsAttended || 0, icon: Activity, color: 'text-chart-1', bg: 'bg-chart-1/10' },
-          { label: 'Last Active', value: user.lastActive ? new Date(user.lastActive).toLocaleDateString() : 'N/A', icon: Calendar, color: 'text-primary', bg: 'bg-primary/10' },
-        ].map(item => {
-          const Icon = item.icon
-          return (
-            <div key={item.label} className="bg-card border border-border rounded-xl p-4 shadow-sm">
-              <div className="flex items-center gap-3 mb-3">
-                <div className={cn("w-8 h-8 rounded-full flex items-center justify-center", item.bg)}>
-                  <Icon className={cn('w-4 h-4', item.color)} />
-                </div>
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{item.label}</span>
+      {!guildId ? (
+        <EmptyState
+          icon={Users}
+          title="Select a server"
+          description="Choose a Discord server to load its member list."
+        />
+      ) : loading ? (
+        <LoadingState message="Loading participants…" />
+      ) : error ? (
+        <ErrorPanel message={error} offline={error.includes("offline")} />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={Users}
+          title={search ? "No participants match your search" : "No members found"}
+          description={
+            search
+              ? "Try a different search term."
+              : "The bot may not see any non-bot members in this server, or the bot is not connected."
+          }
+        />
+      ) : (
+        <div className="space-y-1">
+          {filtered.map((p) => (
+            <button
+              key={p.userId}
+              onClick={() => setSelected(selected?.userId === p.userId ? null : p)}
+              className={cn(
+                "w-full flex items-center gap-4 rounded-lg border px-5 py-3 text-left transition-colors",
+                selected?.userId === p.userId
+                  ? "border-primary/30 bg-accent/30"
+                  : "border-border bg-card hover:border-primary/20 hover:bg-accent/10"
+              )}
+            >
+              {/* Avatar */}
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted shrink-0">
+                <span className="text-sm font-medium text-muted-foreground">
+                  {(p.displayName ?? p.username ?? "?").charAt(0).toUpperCase()}
+                </span>
               </div>
-              <div className="flex items-baseline gap-1 mt-1">
-                <span className="text-2xl font-bold">{item.value}</span>
-                {'unit' in item && item.unit && <span className="text-sm text-muted-foreground">{item.unit}</span>}
+
+              {/* Name / ID */}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">
+                  {p.displayName ?? p.username ?? "Unknown"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  @{p.username ?? p.userId}
+                  {p.currentVoiceChannel && (
+                    <span className="ml-2 text-success">
+                      <Volume2 className="inline h-3 w-3 mr-0.5" />
+                      {p.currentVoiceChannel}
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              {/* Stats */}
+              <div className="hidden sm:flex items-center gap-5 text-xs text-muted-foreground">
+                {p.sessionsAttended != null && (
+                  <span>{p.sessionsAttended} sessions</span>
+                )}
+                {p.totalVoiceMinutes != null && (
+                  <span className="flex items-center gap-1">
+                    <Timer className="h-3 w-3" />
+                    {formatDuration(p.totalVoiceMinutes)}
+                  </span>
+                )}
+                {p.totalMessages != null && (
+                  <span className="flex items-center gap-1">
+                    <MessageSquare className="h-3 w-3" />
+                    {p.totalMessages}
+                  </span>
+                )}
+                {p.participationScore != null && (
+                  <span
+                    className={cn(
+                      "font-medium",
+                      p.participationScore >= 70
+                        ? "text-success"
+                        : p.participationScore >= 40
+                        ? "text-warning-foreground"
+                        : "text-destructive"
+                    )}
+                  >
+                    {p.participationScore}%
+                  </span>
+                )}
+              </div>
+
+              {p.lastActive && (
+                <span className="hidden lg:block text-xs text-muted-foreground shrink-0">
+                  {formatTimeAgo(p.lastActive)}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Detail drawer */}
+      {selected && (
+        <div className="mt-4 rounded-lg border border-primary/20 bg-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent">
+                <span className="text-base font-semibold text-primary">
+                  {(selected.displayName ?? selected.username ?? "?").charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {selected.displayName ?? selected.username}
+                </p>
+                <p className="text-xs text-muted-foreground">ID: {selected.userId}</p>
               </div>
             </div>
-          )
-        })}
-      </div>
+            <button
+              onClick={() => setSelected(null)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Close
+            </button>
+          </div>
 
-      {user.voiceChannelName && (
-        <div className="bg-status-online/5 border border-status-online/20 rounded-xl p-4 flex items-center gap-3">
-          <CheckCircle className="w-5 h-5 text-status-online" />
-          <p className="text-sm text-foreground font-medium">
-            Currently active in <span className="font-semibold text-status-online">#{user.voiceChannelName}</span>
-          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatChip label="Sessions" value={selected.sessionsAttended ?? "—"} />
+            <StatChip label="Voice time" value={formatDuration(selected.totalVoiceMinutes)} />
+            <StatChip label="Messages" value={selected.totalMessages ?? "—"} />
+            <StatChip label="Score" value={selected.participationScore != null ? `${selected.participationScore}%` : "—"} />
+          </div>
+
+          {selected.currentVoiceChannel && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-success">
+              <Volume2 className="h-3.5 w-3.5" />
+              Currently in {selected.currentVoiceChannel}
+            </div>
+          )}
+          {selected.lastActive && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Last active {formatTimeAgo(selected.lastActive)}
+            </p>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-export default function ParticipantsPage() {
-  const [users, setUsers] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState<any>(null)
-  const [search, setSearch] = useState('')
-
-  async function fetchUsers() {
-    setLoading(true)
-    try {
-      const res = await fetch('/api/users?pageSize=50')
-      const data = await res.json()
-      if (data.success && data.data?.data) {
-        const mapped = data.data.data.map((u: any) => ({
-          ...u,
-          displayName: u.display_name || u.username,
-          sessionsAttended: u.sessionsAttended || 0,
-          totalVoiceMinutes: u.totalVoiceMinutes || 0,
-          messageCount: u.totalMessages || 0,
-          lastActive: u.lastActive || u.updated_at,
-          inVoice: false,
-          voiceChannelName: null
-        }))
-        setUsers(mapped)
-      }
-    } catch (err: any) {
-      console.error(err)
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => { fetchUsers() }, [])
-
-  const filtered = useMemo(() => {
-    if (!search) return users
-    const q = search.toLowerCase()
-    return users.filter(u =>
-      u.username?.toLowerCase().includes(q) ||
-      u.displayName?.toLowerCase().includes(q)
-    )
-  }, [users, search])
-
+function StatChip({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex flex-col h-screen">
-      <Topbar
-        title="Participants"
-        subtitle="Manage and view student engagement"
-        actions={
-          <button
-            onClick={fetchUsers}
-            disabled={loading}
-            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            Refresh
-          </button>
-        }
-      />
-
-      <div className="flex flex-1 overflow-hidden bg-background">
-        {/* User list sidebar */}
-        <div className="w-80 border-r border-border flex flex-col bg-card/30 flex-shrink-0">
-          {/* Search */}
-          <div className="p-4 border-b border-border">
-            <div className="flex items-center gap-2 bg-background border border-input rounded-lg px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-primary/50 transition-all">
-              <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search participants..."
-                className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* User list */}
-          <div className="flex-1 overflow-y-auto">
-            {loading ? (
-              <div className="flex flex-col items-center justify-center h-32 gap-3">
-                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Loading participants...</span>
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="p-8 text-center">
-                <Users className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">
-                  {users.length === 0 ? 'No participants found yet.' : 'No matches found.'}
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-border/50">
-                {filtered.map((user) => (
-                  <button
-                    key={user.id}
-                    onClick={() => setSelected(user)}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/50',
-                      selected?.id === user.id ? 'bg-primary/5 border-l-2 border-l-primary' : 'border-l-2 border-l-transparent'
-                    )}
-                  >
-                    <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
-                      <span className="text-sm font-bold text-foreground">
-                        {(user.displayName || user.username || '?')[0]?.toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold truncate">{user.displayName || user.username}</span>
-                        {user.inVoice && <div className="w-2 h-2 bg-status-online rounded-full"></div>}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                        {user.sessionsAttended} sessions
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* User detail */}
-        <div className="flex-1 overflow-hidden bg-background">
-          {selected ? (
-            <UserDetail user={selected} />
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Users className="w-8 h-8 text-muted-foreground/50" />
-                </div>
-                <h3 className="text-lg font-medium text-foreground mb-1">No Participant Selected</h3>
-                <p className="text-sm text-muted-foreground max-w-sm">
-                  Select a participant from the list to view their engagement stats, voice activity, and session history.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+    <div className="rounded-md bg-muted px-3 py-2">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-sm font-semibold text-foreground">{value}</p>
     </div>
   )
 }

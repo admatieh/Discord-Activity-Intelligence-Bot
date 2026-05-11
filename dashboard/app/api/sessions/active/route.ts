@@ -1,18 +1,19 @@
-// dashboard/app/api/sessions/active/route.ts
-import { NextResponse } from 'next/server';
-
-const BOT_API_URL = process.env.BOT_API_URL || 'http://127.0.0.1:4000/api';
-const BOT_API_KEY = process.env.BOT_API_KEY || 'local_dashboard_key_123';
+import { NextResponse } from "next/server"
+import { botGet } from "@/lib/server/botApi"
+import { mapSessionRow } from "@/lib/server/botMappers"
 
 export async function GET() {
-  try {
-    const res = await fetch(`${BOT_API_URL}/sessions/active`, {
-      headers: { 'x-api-key': BOT_API_KEY },
-      cache: 'no-store'
-    });
-    const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Bot offline', sessions: [] }, { status: 503 });
+  const result = await botGet<{ ok?: boolean; sessions?: unknown[] }>("/sessions/active")
+  if (!result.ok) {
+    return NextResponse.json({
+      ok: false,
+      error: result.error ?? "Bot API is offline",
+      data: [],
+    })
   }
+  const rows = Array.isArray(result.data?.sessions) ? result.data.sessions : []
+  const data = rows
+    .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object")
+    .map(mapSessionRow)
+  return NextResponse.json({ ok: true, data })
 }

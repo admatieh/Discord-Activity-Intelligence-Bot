@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/attendance/attendance.js
 //
 // Session-level attendance summary table.
@@ -11,7 +12,6 @@
 
 const attendanceSummaryModel = require('../../models/attendanceSummaryModel');
 const { resolveSessionContext } = require('../../utils/commandResolver');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 const MAX_ROWS = 15;
@@ -26,6 +26,7 @@ const STATUS_EMOJI = {
 
 module.exports = {
     name: 'attendance',
+    requiredPermission: 'instructor',
     description: 'Show attendance summary for a session.',
     usage: '!attendance [--id <n>] [--channel <#ch>] [--latest]',
     options: [
@@ -34,12 +35,12 @@ module.exports = {
         { name: 'latest',  type: 'boolean', required: false, description: 'Use most recent session' }
     ],
 
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
             const ctx     = resolveSessionContext(message, options);

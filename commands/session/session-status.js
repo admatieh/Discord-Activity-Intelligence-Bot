@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../../utils/permissions');
 // commands/session/session-status.js
 //
 // Show detailed status for a resolved session.
@@ -11,11 +12,11 @@
 
 const sessionService = require('../../modules/sessions/sessionService');
 const { resolveSessionContext } = require('../../utils/commandResolver');
-const { checkInstructor } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 module.exports = {
     name: 'session-status',
+    requiredPermission: 'instructor',
     description: 'Show detailed status for a session.',
     usage: '!session-status [--id <n>] [--channel <#ch>] [--latest]',
     options: [
@@ -24,12 +25,12 @@ module.exports = {
         { name: 'latest',  type: 'boolean', required: false, description: 'Use most recent session' }
     ],
 
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) return message.reply('❌ Server only.');
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
             const ctx     = resolveSessionContext(message, options);

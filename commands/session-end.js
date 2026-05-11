@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../utils/permissions');
 // commands/session-end.js
 //
 // End a voice tracking session with named arguments.
@@ -10,12 +11,12 @@
 // ---------------------------------------------------------------------------
 
 const sessionService = require('../modules/sessions/sessionService');
-const { checkInstructor } = require('../utils/permissions');
 const logger = require('../utils/logger');
 
 module.exports = {
     name: 'session-end',
     category: 'session',
+    requiredPermission: 'instructor',
     aliases: ['stop', 'end'],
     description: 'End an active voice tracking session.',
     usage: '!session-end [--target all|here] [--id <sessionId>] [--channel <#channel>]',
@@ -24,14 +25,14 @@ module.exports = {
         { name: 'id', type: 'number', required: false, description: 'Specific session ID to end' },
         { name: 'channel', type: 'channel', required: false, description: 'Target voice channel to end session in' }
     ],
-    execute(message, _args, { parsed } = {}) {
+    async execute(message, _args, { parsed } = {}) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) {
                 return message.reply('❌ Server only.');
             }
-
-            const perm = checkInstructor(message.member);
-            if (!perm.allowed) return message.reply(perm.message);
 
             const options = parsed?.options || {};
 

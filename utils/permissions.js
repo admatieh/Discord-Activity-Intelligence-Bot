@@ -119,9 +119,31 @@ function getInstructorRole(guild) {
     return `❌ Instructor role not found. Please create a role named "${INSTRUCTOR_ROLE_NAME}" or set INSTRUCTOR_ROLE_IDS.`;
 }
 
+async function requireInstructor(message) {
+    let member = message.member;
+    try {
+        if (message.guild && message.author?.id && !member) {
+            member = await message.guild.members.fetch(message.author.id);
+        }
+    } catch (_) {}
+    return checkInstructor(member);
+}
+
+async function requireBotAdmin(message) {
+    let member = message.member;
+    try {
+        if (message.guild && message.author?.id && !member) {
+            member = await message.guild.members.fetch(message.author.id);
+        }
+    } catch (_) {}
+    return checkBotAdmin(member);
+}
+
 module.exports = {
     checkInstructor,
     checkBotAdmin,
     checkPublic,
-    getInstructorRole
+    getInstructorRole,
+    requireInstructor,
+    requireBotAdmin
 };

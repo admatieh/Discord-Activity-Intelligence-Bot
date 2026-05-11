@@ -1,3 +1,4 @@
+const { requireInstructor } = require('../utils/permissions');
 // commands/welcome.js
 
 const logger = require('../utils/logger');
@@ -5,10 +6,14 @@ const logger = require('../utils/logger');
 module.exports = {
     name: 'welcome',
     category: 'general',
+    requiredPermission: 'instructor',
     description: 'Send a welcome message to the current channel.',
     usage: '!welcome',
     options: [],
-    execute(message) {
+    async execute(message) {
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
+
         try {
             if (!message.guild) {
                 return message.reply('❌ This command can only be used inside a server channel.');
