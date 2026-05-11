@@ -8,7 +8,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
+  Link2,
 } from "lucide-react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -25,57 +27,59 @@ import StatusBadge from "@/components/ui/status-badge"
 import EmptyState from "@/components/states/EmptyState"
 import ErrorPanel from "@/components/states/ErrorPanel"
 import { apiFetch, formatDateTime, formatTimeAgo, safeArray } from "@/lib/helpers"
-import type { Guild, TextChannel, MessageDelivery, ScheduledItem } from "@/lib/types"
+import type { TextChannel, MessageDelivery, ScheduledItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { useWorkspace } from "@/components/providers/workspace-context"
+
+const TEMPLATES = [
+  { label: "Session starts in 10 minutes", text: "Session starts in 10 minutes — please join the voice channel when you’re ready." },
+  { label: "Please join voice", text: "We’re starting shortly. Please join the voice channel so we can take attendance." },
+  { label: "Report is ready", text: "The session report is ready. Check the Reports section in the dashboard or ask your instructor for the summary." },
+]
 
 const MAX_CHARS = 2000
 type SendMode = "now" | "later"
 
 export default function MessagesPage() {
-  const [guilds, setGuilds] = useState<Guild[]>([])
+  const {
+    selectedGuildId,
+    setSelectedGuildId,
+    guilds,
+    guildsLoading,
+  } = useWorkspace()
   const [textChannels, setTextChannels] = useState<TextChannel[]>([])
   const [deliveries, setDeliveries] = useState<MessageDelivery[]>([])
   const [scheduledMessages, setScheduledMessages] = useState<ScheduledItem[]>([])
-  const [loadingGuilds, setLoadingGuilds] = useState(true)
   const [loadingChannels, setLoadingChannels] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; message: string; scheduleLink?: boolean } | null>(null)
 
-  const [selectedGuild, setSelectedGuild] = useState("")
   const [selectedChannel, setSelectedChannel] = useState("")
   const [content, setContent] = useState("")
   const [sendMode, setSendMode] = useState<SendMode>("now")
   const [scheduledAt, setScheduledAt] = useState("")
 
-  // Load guilds and deliveries
-  useEffect(() => {
-    async function init() {
-      const [guildsRes, deliveriesRes, scheduledRes] = await Promise.allSettled([
-        apiFetch<Guild[]>("/api/discord/guilds"),
-        apiFetch<MessageDelivery[]>("/api/actions/message/deliveries"),
-        apiFetch<ScheduledItem[]>("/api/actions/schedule"),
-      ])
-      if (guildsRes.status === "fulfilled" && guildsRes.value.ok) {
-        const arr = safeArray<Guild>(guildsRes.value.data)
-        setGuilds(arr)
-        if (arr.length === 1) setSelectedGuild(arr[0].id)
-      }
-      if (deliveriesRes.status === "fulfilled" && deliveriesRes.value.ok) {
-        setDeliveries(safeArray(deliveriesRes.value.data))
-      }
-      if (scheduledRes.status === "fulfilled" && scheduledRes.value.ok) {
-        const all = safeArray<ScheduledItem>(scheduledRes.value.data)
-        setScheduledMessages(all.filter((i) => i.type === "message" && i.status === "scheduled"))
-      }
-      setLoadingGuilds(false)
+  const refreshLists = async () => {
+    const [deliveriesRes, scheduledRes] = await Promise.allSettled([
+      apiFetch<MessageDelivery[]>("/api/actions/message/deliveries"),
+      apiFetch<ScheduledItem[]>("/api/actions/schedule"),
+    ])
+    if (deliveriesRes.status === "fulfilled" && deliveriesRes.value.ok) {
+      setDeliveries(safeArray(deliveriesRes.value.data))
     }
-    init()
+    if (scheduledRes.status === "fulfilled" && scheduledRes.value.ok) {
+      const all = safeArray<ScheduledItem>(scheduledRes.value.data)
+      setScheduledMessages(all.filter((i) => i.type === "message" && i.status === "scheduled"))
+    }
+  }
+
+  useEffect(() => {
+    void refreshLists()
   }, [])
 
-  // Load text channels when guild changes
   useEffect(() => {
-    if (!selectedGuild) {
+    if (!selectedGuildId) {
       setTextChannels([])
       setSelectedChannel("")
       return
@@ -83,18 +87,18 @@ export default function MessagesPage() {
     async function loadChannels() {
       setLoadingChannels(true)
       const res = await apiFetch<TextChannel[]>(
-        `/api/discord/guilds/${selectedGuild}/text-channels`
+        `/api/discord/guilds/${selectedGuildId}/text-channels`
       )
       if (res.ok) setTextChannels(safeArray(res.data))
       setSelectedChannel("")
       setLoadingChannels(false)
     }
-    loadChannels()
-  }, [selectedGuild])
+    void loadChannels()
+  }, [selectedGuildId])
 
   const canSubmit =
     Boolean(
-      selectedGuild &&
+      selectedGuildId &&
         selectedChannel &&
         content.trim().length > 0 &&
         content.length <= MAX_CHARS &&
@@ -111,13 +115,13 @@ export default function MessagesPage() {
     const payload =
       sendMode === "now"
         ? {
-            guildId: selectedGuild,
+            guildId: selectedGuildId,
             textChannelId: selectedChannel,
             content: content.trim(),
             requestedBy: "dashboard",
           }
         : {
-            guildId: selectedGuild,
+            guildId: selectedGuildId,
             textChannelId: selectedChannel,
             content: content.trim(),
             scheduledFor: new Date(scheduledAt).toISOString(),
@@ -137,9 +141,14 @@ export default function MessagesPage() {
     if (res.ok) {
       const msg =
         sendMode === "now" ? "Message sent successfully." : "Message scheduled successfully."
-      setResult({ ok: true, message: msg })
+      setResult({
+        ok: true,
+        message: msg,
+        scheduleLink: sendMode === "later",
+      })
       toast.success(msg)
       setContent("")
+      void refreshLists()
     } else {
       const msg = res.error ?? "Something went wrong."
       setResult({ ok: false, message: msg })
@@ -168,9 +177,9 @@ export default function MessagesPage() {
             {/* Server */}
             <div className="space-y-1.5">
               <Label>Discord server</Label>
-              <Select value={selectedGuild} onValueChange={setSelectedGuild} disabled={loadingGuilds}>
+              <Select value={selectedGuildId} onValueChange={setSelectedGuildId} disabled={guildsLoading}>
                 <SelectTrigger>
-                  <SelectValue placeholder={loadingGuilds ? "Loading servers…" : "Select a server…"} />
+                  <SelectValue placeholder={guildsLoading ? "Loading servers…" : "Select a server…"} />
                 </SelectTrigger>
                 <SelectContent>
                   {guilds.map((g) => (
@@ -186,7 +195,7 @@ export default function MessagesPage() {
               {loadingChannels ? (
                 <div className="h-9 rounded-md border border-border bg-muted animate-pulse" />
               ) : (
-                <Select value={selectedChannel} onValueChange={setSelectedChannel} disabled={!selectedGuild}>
+                <Select value={selectedChannel} onValueChange={setSelectedChannel} disabled={!selectedGuildId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select a channel…" />
                   </SelectTrigger>
@@ -215,6 +224,24 @@ export default function MessagesPage() {
                 onChange={(e) => setContent(e.target.value)}
                 className={cn(charOver && "border-destructive focus-visible:ring-destructive")}
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Quick templates</Label>
+              <div className="flex flex-wrap gap-2">
+                {TEMPLATES.map((t) => (
+                  <Button
+                    key={t.label}
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setContent(t.text)}
+                  >
+                    {t.label}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             {/* Send mode */}
@@ -269,18 +296,27 @@ export default function MessagesPage() {
           {result && (
             <div
               className={cn(
-                "flex items-start gap-3 rounded-lg border px-4 py-3",
+                "rounded-lg border px-4 py-3 space-y-2",
                 result.ok
                   ? "border-success/20 bg-success-subtle text-success"
                   : "border-destructive/20 bg-danger-subtle text-destructive"
               )}
             >
-              {result.ok ? (
-                <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
-              ) : (
-                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <div className="flex items-start gap-3">
+                {result.ok ? (
+                  <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                )}
+                <p className="text-sm font-medium">{result.message}</p>
+              </div>
+              {result.ok && result.scheduleLink && (
+                <Button variant="outline" size="sm" className="gap-1.5 w-full sm:w-auto border-success/30" asChild>
+                  <Link href="/scheduled">
+                    <Link2 className="h-3.5 w-3.5" /> View scheduled
+                  </Link>
+                </Button>
               )}
-              <p className="text-sm">{result.message}</p>
             </div>
           )}
 

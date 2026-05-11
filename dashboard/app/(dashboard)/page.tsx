@@ -193,6 +193,21 @@ export default function HomePage() {
         />
       </div>
 
+      {!loading && !data.activeSession && (
+        <div className="rounded-lg border border-dashed border-border bg-card/60 px-4 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-foreground">No live session right now</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              When you start recording, a live banner appears across the workspace and your metrics
+              update here.
+            </p>
+          </div>
+          <Button asChild size="sm" className="shrink-0">
+            <Link href="/record">Record a Session</Link>
+          </Button>
+        </div>
+      )}
+
       {/* Active session card */}
       {data.activeSession && (
         <div className="rounded-lg border border-primary/20 bg-accent/30 p-5">
@@ -263,8 +278,18 @@ export default function HomePage() {
               <EmptyState
                 icon={Calendar}
                 title="No scheduled items"
-                description="Schedule a session or message to see it here."
+                description="Plan a session or queue an announcement—your next five upcoming items show here."
                 className="py-8"
+                action={
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    <Button size="sm" asChild>
+                      <Link href="/record">Schedule session</Link>
+                    </Button>
+                    <Button size="sm" variant="outline" asChild>
+                      <Link href="/messages">Schedule message</Link>
+                    </Button>
+                  </div>
+                }
               />
             ) : (
               upcomingScheduled.map((item) => (
@@ -307,8 +332,13 @@ export default function HomePage() {
               <EmptyState
                 icon={Activity}
                 title="No recent activity"
-                description="Bot events will appear here."
+                description="Activity will appear after sessions, messages, and reports are created."
                 className="py-8"
+                action={
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href="/activity">Open Activity</Link>
+                  </Button>
+                }
               />
             ) : (
               data.activity.slice(0, 6).map((event) => (
@@ -340,7 +370,17 @@ export default function HomePage() {
           <EmptyState
             icon={FileText}
             title="No reports yet"
-            description="End a session and generate a report to see it here."
+            description="Generate a report after you end a session to review attendance and participation."
+            action={
+              <div className="flex flex-wrap gap-2 justify-center">
+                <Button size="sm" asChild>
+                  <Link href="/record">Record a Session</Link>
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <Link href="/reports">Browse Reports</Link>
+                </Button>
+              </div>
+            }
           />
         ) : (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

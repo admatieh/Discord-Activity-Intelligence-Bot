@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { Switch } from "@/components/ui/switch"
 import {
   Users,
   Search,
@@ -25,20 +26,21 @@ import EmptyState from "@/components/states/EmptyState"
 import ErrorPanel from "@/components/states/ErrorPanel"
 import LoadingState from "@/components/states/LoadingState"
 import { apiFetch, formatTimeAgo, formatDuration, safeArray } from "@/lib/helpers"
-import type { Guild, Participant } from "@/lib/types"
+import type { Participant } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useWorkspace } from "@/components/providers/workspace-context"
 
 type FilterType = "all" | "in-voice" | "tracked"
 
 const FILTERS: { label: string; value: FilterType }[] = [
   { label: "All", value: "all" },
   { label: "In voice", value: "in-voice" },
-  { label: "Tracked", value: "tracked" },
+  { label: "Tracked only", value: "tracked" },
 ]
 
 export default function ParticipantsPage() {
-  const [guilds, setGuilds] = useState<Guild[]>([])
-  const [guildId, setGuildId] = useState("")
+  const { selectedGuildId, setSelectedGuildId, guilds, guildsLoading } = useWorkspace()
+  const [hideBots, setHideBots] = useState(true)
   const [participants, setParticipants] = useState<Participant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -47,21 +49,9 @@ export default function ParticipantsPage() {
   const [filter, setFilter] = useState<FilterType>("all")
   const [selected, setSelected] = useState<Participant | null>(null)
 
-  useEffect(() => {
-    async function loadGuilds() {
-      const res = await apiFetch<Guild[]>("/api/discord/guilds")
-      if (res.ok) {
-        const arr = safeArray<Guild>(res.data)
-        setGuilds(arr)
-        if (arr.length === 1) setGuildId(arr[0].id)
-      }
-    }
-    void loadGuilds()
-  }, [])
-
   const load = useCallback(
     async (isRefresh = false) => {
-      if (!guildId) {
+      if (!selectedGuildId) {
         setParticipants([])
         setLoading(false)
         setRefreshing(false)
@@ -69,10 +59,12 @@ export default function ParticipantsPage() {
       }
       if (isRefresh) setRefreshing(true)
       else setLoading(true)
-      const res = await apiFetch<Participant[]>(`/api/participants?guildId=${encodeURIComponent(guildId)}`)
+      const res = await apiFetch<Participant[]>(
+        `/api/participants?guildId=${encodeURIComponent(selectedGuildId)}`
+      )
       if (res.ok) {
         const raw = safeArray<Participant>(res.data)
-        setParticipants(raw.filter((p) => !p.isBot))
+        setParticipants(raw)
         setError(null)
       } else {
         setError(res.error ?? "Could not load participants.")
@@ -80,7 +72,7 @@ export default function ParticipantsPage() {
       setLoading(false)
       setRefreshing(false)
     },
-    [guildId]
+    [selectedGuildId]
   )
 
   useEffect(() => {
@@ -89,6 +81,7 @@ export default function ParticipantsPage() {
 
   const filtered = useMemo(() => {
     let list = participants
+    if (hideBots) list = list.filter((p) => !p.isBot)
     if (filter === "in-voice") list = list.filter((p) => p.currentVoiceChannel)
     if (filter === "tracked") list = list.filter((p) => (p.sessionsAttended ?? 0) > 0)
     if (search.trim()) {
@@ -101,7 +94,7 @@ export default function ParticipantsPage() {
       )
     }
     return list
-  }, [participants, filter, search])
+  }, [participants, filter, search, hideBots])
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -130,7 +123,7 @@ export default function ParticipantsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center mb-5">
         <div className="space-y-1.5 min-w-[200px]">
           <Label className="text-xs text-muted-foreground">Discord server</Label>
-          <Select value={guildId} onValueChange={setGuildId}>
+          <Select value={selectedGuildId} onValueChange={setSelectedGuildId} disabled={guildsLoading}>
             <SelectTrigger>
               <SelectValue placeholder="Select a server…" />
             </SelectTrigger>
@@ -150,10 +143,16 @@ export default function ParticipantsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
-            disabled={!guildId}
+            disabled={!selectedGuildId}
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+            <Switch checked={hideBots} onCheckedChange={setHideBots} />
+            Hide bots
+          </label>
+        </div>
+        <div className="flex gap-2 flex-wrap">
           {FILTERS.map((f) => (
             <button
               key={f.value}
@@ -171,7 +170,7 @@ export default function ParticipantsPage() {
         </div>
       </div>
 
-      {!guildId ? (
+      {!selectedGuildId ? (
         <EmptyState
           icon={Users}
           title="Select a server"

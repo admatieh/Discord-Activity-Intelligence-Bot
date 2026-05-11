@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { Activity, RefreshCw, Filter } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { Activity, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import PageHeader from "@/components/layout/PageHeader"
 import EmptyState from "@/components/states/EmptyState"
@@ -10,6 +10,13 @@ import LoadingState from "@/components/states/LoadingState"
 import { apiFetch, formatTimeAgo, safeArray } from "@/lib/helpers"
 import type { ActivityEvent } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import {
+  isToday,
+  isYesterday,
+  isValid,
+  parseISO,
+} from "date-fns"
+import { useWorkspace } from "@/components/providers/workspace-context"
 
 const SEVERITY_FILTERS = [
   { label: "All", value: "all" },
@@ -17,23 +24,36 @@ const SEVERITY_FILTERS = [
   { label: "Success", value: "success" },
   { label: "Warning", value: "warning" },
   { label: "Error", value: "error" },
-]
+] as const
 
 const LIMIT_OPTIONS = [25, 50, 100]
 
+function bucketFor(ts: string): "today" | "yesterday" | "earlier" {
+  const d = parseISO(ts)
+  if (!isValid(d)) return "earlier"
+  if (isToday(d)) return "today"
+  if (isYesterday(d)) return "yesterday"
+  return "earlier"
+}
+
 export default function ActivityPage() {
+  const { selectedGuildId } = useWorkspace()
   const [events, setEvents] = useState<ActivityEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-  const [severityFilter, setSeverityFilter] = useState("all")
+  const [severityFilter, setSeverityFilter] = useState<string>("all")
+  const [typeFilter, setTypeFilter] = useState<string>("all")
   const [limit, setLimit] = useState(50)
 
   const load = useCallback(
     async (isRefresh = false) => {
       if (isRefresh) setRefreshing(true)
       else setLoading(true)
-      const res = await apiFetch(`/api/activity?limit=${limit}`)
+      const sp = new URLSearchParams()
+      sp.set("limit", String(limit))
+      if (selectedGuildId) sp.set("guildId", selectedGuildId)
+      const res = await apiFetch<ActivityEvent[]>(`/api/activity?${sp.toString()}`)
       if (res.ok) {
         setEvents(safeArray(res.data))
         setError(null)
@@ -43,26 +63,52 @@ export default function ActivityPage() {
       setLoading(false)
       setRefreshing(false)
     },
-    [limit]
+    [limit, selectedGuildId]
   )
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    void load()
+  }, [load])
 
-  const filtered =
-    severityFilter === "all"
-      ? events
-      : events.filter((e) => e.severity === severityFilter)
+  const typeOptions = useMemo(() => {
+    const s = new Set<string>()
+    for (const e of events) {
+      if (e.type) s.add(e.type)
+    }
+    return ["all", ...Array.from(s).sort()]
+  }, [events])
+
+  const filtered = useMemo(() => {
+    return events.filter((e) => {
+      if (severityFilter !== "all" && e.severity !== severityFilter) return false
+      if (typeFilter !== "all" && e.type !== typeFilter) return false
+      return true
+    })
+  }, [events, severityFilter, typeFilter])
+
+  const grouped = useMemo(() => {
+    const g: { today: ActivityEvent[]; yesterday: ActivityEvent[]; earlier: ActivityEvent[] } = {
+      today: [],
+      yesterday: [],
+      earlier: [],
+    }
+    for (const e of filtered) {
+      const b = bucketFor(e.timestamp)
+      g[b].push(e)
+    }
+    return g
+  }, [filtered])
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <PageHeader
         title="Activity"
-        description="A human-readable feed of bot and session events."
+        description="Human-readable session and bot events. Technical logs live under Advanced → Technical Logs."
         action={
           <Button
             variant="outline"
             size="sm"
-            onClick={() => load(true)}
+            onClick={() => void load(true)}
             disabled={refreshing}
             className="gap-1.5"
           >
@@ -72,12 +118,18 @@ export default function ActivityPage() {
         }
       />
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-5">
+      {selectedGuildId && (
+        <p className="text-xs text-muted-foreground mb-3">
+          Filtered by the server selected in the sidebar.
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex gap-2 flex-wrap">
           {SEVERITY_FILTERS.map((f) => (
             <button
               key={f.value}
+              type="button"
               onClick={() => setSeverityFilter(f.value)}
               className={cn(
                 "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
@@ -90,11 +142,23 @@ export default function ActivityPage() {
             </button>
           ))}
         </div>
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+        >
+          {typeOptions.map((t) => (
+            <option key={t} value={t}>
+              {t === "all" ? "All types" : t}
+            </option>
+          ))}
+        </select>
         <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
           <span>Show:</span>
           {LIMIT_OPTIONS.map((n) => (
             <button
               key={n}
+              type="button"
               onClick={() => setLimit(n)}
               className={cn(
                 "rounded px-2 py-0.5 transition-colors",
@@ -117,13 +181,28 @@ export default function ActivityPage() {
         <EmptyState
           icon={Activity}
           title="No activity yet"
-          description="Bot events will appear here as they happen."
+          description="Activity appears when sessions, messages, and reports are created. Try clearing filters or pick another server in the sidebar."
         />
       ) : (
-        <div className="space-y-1">
-          {filtered.map((event, index) => (
-            <ActivityRow key={event.id ?? index} event={event} />
-          ))}
+        <div className="space-y-8">
+          {(["today", "yesterday", "earlier"] as const).map((key) => {
+            const list = grouped[key]
+            if (list.length === 0) return null
+            const title =
+              key === "today" ? "Today" : key === "yesterday" ? "Yesterday" : "Earlier"
+            return (
+              <section key={key}>
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                  {title}
+                </h2>
+                <div className="space-y-1.5">
+                  {list.map((event, index) => (
+                    <ActivityRow key={event.id ?? `${key}-${index}`} event={event} />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
         </div>
       )}
     </div>
@@ -142,7 +221,8 @@ function ActivityRow({ event }: { event: ActivityEvent }) {
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground/70">
           {event.channelName && <span>#{event.channelName}</span>}
           {event.username && <span>@{event.username}</span>}
-          {event.type && <span className="capitalize">{event.type}</span>}
+          {event.sessionId && <span>Session {event.sessionId}</span>}
+          {event.type && <span className="font-mono text-[10px]">{event.type}</span>}
         </div>
       </div>
       <p className="text-xs text-muted-foreground shrink-0 mt-0.5">
@@ -160,10 +240,10 @@ function SeverityDot({ severity }: { severity?: string }) {
         severity === "success"
           ? "bg-success"
           : severity === "warning"
-          ? "bg-warning"
-          : severity === "error"
-          ? "bg-destructive"
-          : "bg-muted-foreground/40"
+            ? "bg-warning"
+            : severity === "error"
+              ? "bg-destructive"
+              : "bg-muted-foreground/40"
       )}
     />
   )

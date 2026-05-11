@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Radio, ChevronDown, AlertTriangle, CheckCircle2, Users } from "lucide-react"
+import { Radio, ChevronDown, AlertTriangle, CheckCircle2, Users, Link2 } from "lucide-react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -17,9 +18,10 @@ import PageHeader from "@/components/layout/PageHeader"
 import ErrorPanel from "@/components/states/ErrorPanel"
 import LoadingState from "@/components/states/LoadingState"
 import { apiFetch, safeArray } from "@/lib/helpers"
-import type { Guild, VoiceChannel, TextChannel } from "@/lib/types"
+import type { VoiceChannel, TextChannel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { useWorkspace } from "@/components/providers/workspace-context"
 
 const DURATION_PRESETS = [
   { label: "25 min", value: 25 },
@@ -31,14 +33,23 @@ const DURATION_PRESETS = [
 type StartMode = "now" | "later"
 
 export default function RecordSessionPage() {
-  const [guilds, setGuilds] = useState<Guild[]>([])
+  const {
+    guilds,
+    guildsLoading,
+    guildsError,
+    selectedGuildId,
+    setSelectedGuildId,
+  } = useWorkspace()
   const [voiceChannels, setVoiceChannels] = useState<VoiceChannel[]>([])
   const [textChannels, setTextChannels] = useState<TextChannel[]>([])
-  const [loadingGuilds, setLoadingGuilds] = useState(true)
   const [loadingChannels, setLoadingChannels] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
-  const [guildsError, setGuildsError] = useState<string | null>(null)
+  const [result, setResult] = useState<{
+    ok: boolean
+    message: string
+    detail?: string
+    scheduleLink?: boolean
+  } | null>(null)
 
   // Form state
   const [sessionName, setSessionName] = useState("")
@@ -63,26 +74,8 @@ export default function RecordSessionPage() {
     generateReport: true,
   })
 
-  // Load guilds
   useEffect(() => {
-    async function loadGuilds() {
-      setLoadingGuilds(true)
-      const res = await apiFetch<Guild[]>("/api/discord/guilds")
-      if (res.ok) {
-        setGuilds(safeArray(res.data))
-        const arr = safeArray<Guild>(res.data)
-        if (arr.length === 1) setSelectedGuild(arr[0].id)
-      } else {
-        setGuildsError(res.error ?? "Could not load Discord servers.")
-      }
-      setLoadingGuilds(false)
-    }
-    loadGuilds()
-  }, [])
-
-  // Load channels when guild changes
-  useEffect(() => {
-    if (!selectedGuild) {
+    if (!selectedGuildId) {
       setVoiceChannels([])
       setTextChannels([])
       setSelectedVoice("")
@@ -92,8 +85,8 @@ export default function RecordSessionPage() {
     async function loadChannels() {
       setLoadingChannels(true)
       const [vc, tc] = await Promise.allSettled([
-        apiFetch<VoiceChannel[]>(`/api/discord/guilds/${selectedGuild}/voice-channels`),
-        apiFetch<TextChannel[]>(`/api/discord/guilds/${selectedGuild}/text-channels`),
+        apiFetch<VoiceChannel[]>(`/api/discord/guilds/${selectedGuildId}/voice-channels`),
+        apiFetch<TextChannel[]>(`/api/discord/guilds/${selectedGuildId}/text-channels`),
       ])
       if (vc.status === "fulfilled" && vc.value.ok) {
         setVoiceChannels(safeArray(vc.value.data))
@@ -105,8 +98,8 @@ export default function RecordSessionPage() {
       setSelectedText("")
       setLoadingChannels(false)
     }
-    loadChannels()
-  }, [selectedGuild])
+    void loadChannels()
+  }, [selectedGuildId])
 
   const effectiveDuration = isCustomDuration
     ? parseInt(customDuration) || 0
@@ -114,7 +107,7 @@ export default function RecordSessionPage() {
 
   const selectedVoiceChannel = voiceChannels.find((c) => c.id === selectedVoice)
   const canSubmit =
-    Boolean(selectedGuild && selectedVoice && effectiveDuration > 0 && !submitting) &&
+    Boolean(selectedGuildId && selectedVoice && effectiveDuration > 0 && !submitting) &&
     (startMode === "now" || Boolean(scheduledAt))
 
   async function handleSubmit(e: React.FormEvent) {
@@ -127,7 +120,7 @@ export default function RecordSessionPage() {
     const payload =
       startMode === "now"
         ? {
-            guildId: selectedGuild,
+            guildId: selectedGuildId,
             voiceChannelId: selectedVoice,
             textChannelId: selectedText || undefined,
             title: sessionName.trim() || undefined,
@@ -138,7 +131,7 @@ export default function RecordSessionPage() {
             source: "dashboard",
           }
         : {
-            guildId: selectedGuild,
+            guildId: selectedGuildId,
             voiceChannelId: selectedVoice,
             textChannelId: selectedText || undefined,
             title: sessionName.trim() || undefined,
@@ -163,7 +156,17 @@ export default function RecordSessionPage() {
         startMode === "now"
           ? "Session started successfully."
           : "Session scheduled successfully."
-      setResult({ ok: true, message: msg })
+      const voiceName = voiceChannels.find((c) => c.id === selectedVoice)?.name
+      const detail =
+        startMode === "now"
+          ? `${voiceName ? `#${voiceName}` : "Voice channel"} · ${effectiveDuration} min`
+          : `Scheduled · ${effectiveDuration} min`
+      setResult({
+        ok: true,
+        message: msg,
+        detail,
+        scheduleLink: startMode === "later",
+      })
       toast.success(msg)
       setSessionName("")
       setSelectedVoice("")
@@ -184,7 +187,7 @@ export default function RecordSessionPage() {
     setOptions((o) => ({ ...o, [key]: !o[key] }))
   }
 
-  if (loadingGuilds) return <LoadingState message="Loading Discord servers…" className="mt-20" />
+  if (guildsLoading) return <LoadingState message="Loading Discord servers…" className="mt-20" />
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
@@ -201,10 +204,14 @@ export default function RecordSessionPage() {
         />
       )}
 
+      <p className="text-sm text-muted-foreground mb-5 rounded-lg border border-border bg-accent/15 px-4 py-3">
+        The bot records attendance and activity from the selected voice channel. You can change the server anytime from the sidebar.
+      </p>
+
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Session name */}
         <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Session details</h2>
+          <h2 className="text-sm font-semibold text-foreground">Session title</h2>
           <div className="space-y-1.5">
             <Label htmlFor="session-name">Session title <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <Input
@@ -218,11 +225,10 @@ export default function RecordSessionPage() {
 
         {/* Server and channels */}
         <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Server &amp; channels</h2>
-
+          <h2 className="text-sm font-semibold text-foreground">Where</h2>
           <div className="space-y-1.5">
             <Label>Discord server</Label>
-            <Select value={selectedGuild} onValueChange={setSelectedGuild}>
+            <Select value={selectedGuildId} onValueChange={setSelectedGuildId}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a server…" />
               </SelectTrigger>
@@ -234,7 +240,7 @@ export default function RecordSessionPage() {
             </Select>
           </div>
 
-          {selectedGuild && (
+          {selectedGuildId && (
             <>
               <div className="space-y-1.5">
                 <Label>Voice channel</Label>
@@ -296,7 +302,7 @@ export default function RecordSessionPage() {
 
         {/* Timing */}
         <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Timing</h2>
+          <h2 className="text-sm font-semibold text-foreground">2. When</h2>
 
           <div className="flex gap-2">
             {(["now", "later"] as StartMode[]).map((mode) => (
@@ -379,7 +385,7 @@ export default function RecordSessionPage() {
 
         {/* Tracking */}
         <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Tracking options</h2>
+          <h2 className="text-sm font-semibold text-foreground">3. What to track</h2>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {(Object.keys(tracking) as Array<keyof typeof tracking>).map((key) => (
               <label key={key} className="flex items-center gap-2.5 cursor-pointer">
@@ -413,18 +419,32 @@ export default function RecordSessionPage() {
         {result && (
           <div
             className={cn(
-              "flex items-start gap-3 rounded-lg border px-4 py-3",
+              "rounded-lg border px-4 py-3 space-y-2",
               result.ok
                 ? "border-success/20 bg-success-subtle text-success"
                 : "border-destructive/20 bg-danger-subtle text-destructive"
             )}
           >
-            {result.ok ? (
-              <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
-            ) : (
-              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div className="flex items-start gap-3">
+              {result.ok ? (
+                <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+              ) : (
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              )}
+              <div>
+                <p className="text-sm font-medium">{result.message}</p>
+                {result.detail && (
+                  <p className="text-xs opacity-90 mt-0.5">{result.detail}</p>
+                )}
+              </div>
+            </div>
+            {result.ok && result.scheduleLink && (
+              <Button variant="outline" size="sm" className="gap-1.5 w-full sm:w-auto border-success/30" asChild>
+                <Link href="/scheduled">
+                  <Link2 className="h-3.5 w-3.5" /> View scheduled
+                </Link>
+              </Button>
             )}
-            <p className="text-sm">{result.message}</p>
           </div>
         )}
 
@@ -443,7 +463,6 @@ export default function RecordSessionPage() {
             variant="outline"
             onClick={() => {
               setSessionName("")
-              setSelectedGuild("")
               setSelectedVoice("")
               setSelectedText("")
               setStartMode("now")

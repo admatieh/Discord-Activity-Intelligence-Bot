@@ -99,19 +99,27 @@ function startApiServer(client) {
             // ----------------------------------------------------------------
             if (pathname === '/api/execute' && method === 'POST') {
                 const data = await readBody(req);
-                const { command, args, requestId, guildId, channelId } = data;
-                let commandString = typeof command === 'string' && command.startsWith('!') ? command : `!${command}`;
+                const { command, args, requestId, guildId, channelId, voiceChannelId, textChannelId } = data;
+                const rawCmd = typeof command === 'string' ? command.trim() : '';
+                let commandString = rawCmd.startsWith('!') ? rawCmd : (rawCmd ? `!${rawCmd}` : '');
+                if (!commandString) {
+                    return sendJson(res, 400, { success: false, error: 'command is required', requestId: requestId || `exec_${Date.now()}` });
+                }
                 if (args && typeof args === 'object') {
                     for (const [key, value] of Object.entries(args)) {
                         if (value === true) commandString += ` --${key}`;
                         else if (value !== false && value !== undefined) commandString += ` --${key} "${value}"`;
                     }
                 }
+                const textCtx = textChannelId || channelId || null;
+                const voiceCtx = voiceChannelId || null;
                 const context = {
                     source: 'dashboard',
                     user: { id: 'dashboard', username: 'Dashboard Admin' },
                     guild: guildId ? { id: guildId } : null,
-                    channel: channelId ? { id: channelId } : null
+                    channel: textCtx ? { id: textCtx } : null,
+                    voiceChannelId: voiceCtx,
+                    textChannelId: textCtx
                 };
                 const result = await executeCommand(commandString, context);
                 return sendJson(res, result.exitCode === 0 ? 200 : 400, {

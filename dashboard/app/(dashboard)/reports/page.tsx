@@ -11,6 +11,23 @@ import ErrorPanel from "@/components/states/ErrorPanel"
 import LoadingState from "@/components/states/LoadingState"
 import { apiFetch, formatDateShort, formatDuration, safeArray } from "@/lib/helpers"
 import type { Report } from "@/lib/types"
+
+function listTakeawayLines(report: Report): string[] {
+  const lines: string[] = []
+  const n = report.participantCount
+  if (n === 0) {
+    lines.push("This session shows zero participants in the index—generate the report after ending, or confirm voice tracking.")
+  } else if (n != null && n > 0) {
+    lines.push(`${n} participant(s) in the session summary.`)
+  }
+  if (report.durationMinutes != null && report.durationMinutes > 0) {
+    lines.push(`Scheduled or recorded duration about ${formatDuration(report.durationMinutes)}.`)
+  }
+  if (lines.length === 0) {
+    lines.push("Open or generate the report to see attendance and participation detail.")
+  }
+  return lines
+}
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -80,6 +97,11 @@ export default function ReportsPage() {
           icon={FileText}
           title="No reports yet"
           description="End a session and generate a report to see it here."
+          action={
+            <Button size="sm" asChild>
+              <Link href="/record">Go to Record Session</Link>
+            </Button>
+          }
         />
       ) : (
         <div className="space-y-2">
@@ -108,6 +130,11 @@ export default function ReportsPage() {
                     </span>
                   )}
                 </div>
+                <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground list-disc pl-4">
+                  {listTakeawayLines(report).map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
               </div>
               <StatusBadge status={report.status} />
               <div className="flex items-center gap-2 shrink-0">

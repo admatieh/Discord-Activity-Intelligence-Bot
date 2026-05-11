@@ -85,6 +85,7 @@ Browser
 | Reports | `/reports` | View and generate session reports |
 | Participants | `/participants` | View tracked users and activity stats |
 | Activity | `/activity` | Human-readable event feed |
+| Setup Guide | `/setup` | Zero-to-hero setup, env reference, troubleshooting, live diagnostics |
 
 ### Advanced Tools
 
@@ -93,7 +94,16 @@ Browser
 | Command Terminal | `/advanced/terminal` | Execute bot commands directly |
 | Command Explorer | `/advanced/commands` | Browse all available commands |
 | System Health | `/advanced/system` | Bot status, DB tables, uptime |
-| Technical Logs | `/advanced/logs` | Raw system logs with filtering/export |
+| Technical Logs | `/advanced/logs` | Raw system logs (route planned; use `/api/logs` or Activity for now) |
+
+---
+
+## Command Terminal (Advanced)
+
+- Route: **`/advanced/terminal`**
+- The browser calls **`POST /api/execute`** only; Next.js attaches **`BOT_API_KEY`** server-side.
+- Commands should use the same **`!`** prefix as in Discord (e.g. `!help`). The UI may normalize bare names to prefixed form.
+- Pass **guild**, **text**, and **voice** channel IDs when testing channel-aware commands; the bot executor builds a safe mock context from those IDs.
 
 ---
 
@@ -152,6 +162,7 @@ Follow these steps to verify the full integration:
 1. **Start the bot**: `node index.js` from the repo root
 2. **Start the dashboard**: `cd dashboard && pnpm dev`
 3. **Open**: [http://localhost:3000](http://localhost:3000)
+3b. ✅ **Setup Guide** (`/setup`) — diagnostics run, guild/commands checks make sense when bot is up
 4. ✅ Home page loads — Bot status shows **Online**
 5. ✅ Home page — Database shows **Connected**
 6. ✅ Sidebar footer shows green Bot / DB status dots

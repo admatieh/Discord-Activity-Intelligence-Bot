@@ -28,6 +28,9 @@ import { apiFetch, formatDateTime, formatDuration, safeArray } from "@/lib/helpe
 import type { ScheduledItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import Link from "next/link"
+import { formatDistanceToNow, isValid, parseISO } from "date-fns"
+import { useWorkspace } from "@/components/providers/workspace-context"
 
 type FilterType = "all" | "session" | "message" | "scheduled" | "completed" | "failed" | "cancelled"
 
@@ -42,6 +45,7 @@ const FILTERS: { label: string; value: FilterType }[] = [
 ]
 
 export default function ScheduledPage() {
+  const { selectedGuildId } = useWorkspace()
   const [items, setItems] = useState<ScheduledItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -58,7 +62,10 @@ export default function ScheduledPage() {
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
     else setLoading(true)
-    const res = await apiFetch("/api/actions/schedule")
+    const qs = selectedGuildId
+      ? `?guildId=${encodeURIComponent(selectedGuildId)}`
+      : ""
+    const res = await apiFetch(`/api/actions/schedule${qs}`)
     if (res.ok) {
       setItems(safeArray(res.data))
       setError(null)
@@ -67,9 +74,11 @@ export default function ScheduledPage() {
     }
     setLoading(false)
     setRefreshing(false)
-  }, [])
+  }, [selectedGuildId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const filtered = items.filter((item) => {
     if (filter === "all") return true
@@ -138,11 +147,22 @@ export default function ScheduledPage() {
       ) : error ? (
         <ErrorPanel message={error} offline={error.includes("offline")} />
       ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={Calendar}
-          title="No scheduled items"
-          description="Schedule a session or message using the Record or Messages pages."
-        />
+        <div className="rounded-lg border border-border bg-card p-8 text-center space-y-4">
+          <EmptyState
+            icon={Calendar}
+            title="No scheduled items"
+            description="When you schedule a session or message, it will show up here. Pick a server in the sidebar to filter by guild."
+            className="py-4"
+          />
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button asChild size="sm">
+              <Link href="/record">Schedule session</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/messages">Schedule message</Link>
+            </Button>
+          </div>
+        </div>
       ) : (
         <div className="space-y-2">
           {filtered.map((item) => (
@@ -226,6 +246,13 @@ function ScheduledItemRow({
           <span>
             <Calendar className="inline h-3 w-3 mr-1" />
             {formatDateTime(item.scheduledAt)}
+            {item.scheduledAt &&
+              isValid(parseISO(item.scheduledAt)) && (
+                <span className="text-muted-foreground/80">
+                  {" "}
+                  ({formatDistanceToNow(parseISO(item.scheduledAt), { addSuffix: true })})
+                </span>
+              )}
           </span>
           {item.channelName && <span>#{item.channelName}</span>}
           {item.durationMinutes && <span>{formatDuration(item.durationMinutes)}</span>}

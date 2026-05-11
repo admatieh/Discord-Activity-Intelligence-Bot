@@ -14,15 +14,17 @@ import {
   BookOpen,
   Server,
   ScrollText,
+  Settings,
   ChevronDown,
   ChevronRight,
   Bot,
   Database,
-  Settings,
+  LifeBuoy,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import { useBotStatus } from "@/hooks/use-bot-status"
+import { GuildSelector } from "@/components/layout/GuildSelector"
 
 interface NavItem {
   label: string
@@ -38,6 +40,7 @@ const workspaceNav: NavItem[] = [
   { label: "Reports", href: "/reports", icon: FileText },
   { label: "Participants", href: "/participants", icon: Users },
   { label: "Activity", href: "/activity", icon: Activity },
+  { label: "Setup Guide", href: "/setup", icon: LifeBuoy },
 ]
 
 const advancedNav: NavItem[] = [
@@ -45,6 +48,7 @@ const advancedNav: NavItem[] = [
   { label: "Command Explorer", href: "/advanced/commands", icon: BookOpen },
   { label: "System Health", href: "/advanced/system", icon: Server },
   { label: "Technical Logs", href: "/advanced/logs", icon: ScrollText },
+  { label: "Settings", href: "/settings", icon: Settings },
 ]
 
 export function AppSidebar() {
@@ -56,7 +60,6 @@ export function AppSidebar() {
 
   return (
     <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-border bg-sidebar">
-      {/* Brand */}
       <div className="flex items-center gap-2.5 border-b border-border px-5 py-4">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
           <Bot className="h-4 w-4 text-primary-foreground" />
@@ -66,14 +69,14 @@ export function AppSidebar() {
             Instructor
           </p>
           <p className="text-xs text-muted-foreground leading-tight">
-            Dashboard
+            Workspace
           </p>
         </div>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
-        {/* Workspace */}
+      <GuildSelector />
+
+      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-5">
         <div>
           <p className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Workspace
@@ -109,9 +112,9 @@ export function AppSidebar() {
           </ul>
         </div>
 
-        {/* Advanced */}
         <div>
           <button
+            type="button"
             onClick={() => setAdvancedOpen((o) => !o)}
             className="mb-1.5 flex w-full items-center justify-between px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -153,37 +156,45 @@ export function AppSidebar() {
         </div>
       </nav>
 
-      {/* Footer status */}
       <div className="border-t border-border px-4 py-3 space-y-1.5">
-        <Link
-          href="/settings"
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground hover:bg-accent/50 transition-colors"
-        >
-          <Settings className="h-4 w-4" />
-          <span>Settings</span>
-        </Link>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Bot className="h-3.5 w-3.5 shrink-0" />
           <span>Bot:</span>
           <StatusDot status={status.bot} />
-          <span className={cn(
-            status.bot === "online" ? "text-success" :
-            status.bot === "offline" ? "text-destructive" :
-            "text-warning"
-          )}>
-            {status.bot === "online" ? "Online" : status.bot === "offline" ? "Offline" : "Checking…"}
+          <span
+            className={cn(
+              status.bot === "online"
+                ? "text-success"
+                : status.bot === "offline"
+                  ? "text-destructive"
+                  : "text-warning"
+            )}
+          >
+            {status.bot === "online"
+              ? "Online"
+              : status.bot === "offline"
+                ? "Offline"
+                : "Checking…"}
           </span>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Database className="h-3.5 w-3.5 shrink-0" />
           <span>Database:</span>
           <StatusDot status={status.db} />
-          <span className={cn(
-            status.db === "connected" ? "text-success" :
-            status.db === "disconnected" ? "text-destructive" :
-            "text-warning"
-          )}>
-            {status.db === "connected" ? "Connected" : status.db === "disconnected" ? "Disconnected" : "Checking…"}
+          <span
+            className={cn(
+              status.db === "connected"
+                ? "text-success"
+                : status.db === "disconnected"
+                  ? "text-destructive"
+                  : "text-warning"
+            )}
+          >
+            {status.db === "connected"
+              ? "Connected"
+              : status.db === "disconnected"
+                ? "Disconnected"
+                : "Checking…"}
           </span>
         </div>
       </div>
@@ -199,8 +210,8 @@ function StatusDot({ status }: { status: string }) {
         status === "online" || status === "connected"
           ? "bg-success"
           : status === "offline" || status === "disconnected"
-          ? "bg-destructive"
-          : "bg-warning animate-pulse"
+            ? "bg-destructive"
+            : "bg-warning animate-pulse"
       )}
     />
   )

@@ -14,6 +14,7 @@ import {
   Send,
   Loader2,
   FileText,
+  Copy,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -136,11 +137,36 @@ export default function ReportDetailPage() {
     )
   }
 
-  const participants = safeArray<ParticipantSummary>(report.participants)
-  const top = safeArray<ParticipantSummary>(report.topParticipants)
-  const low = safeArray<ParticipantSummary>(report.lowActivityParticipants)
-  const late = safeArray<ParticipantSummary>(report.lateJoiners)
-  const early = safeArray<ParticipantSummary>(report.earlyLeavers)
+  /** Snapshot for this render so nested handlers satisfy strict null checks. */
+  const sessionReport = report
+
+  const participants = safeArray<ParticipantSummary>(sessionReport.participants)
+  const top = safeArray<ParticipantSummary>(sessionReport.topParticipants)
+  const low = safeArray<ParticipantSummary>(sessionReport.lowActivityParticipants)
+  const late = safeArray<ParticipantSummary>(sessionReport.lateJoiners)
+  const early = safeArray<ParticipantSummary>(sessionReport.earlyLeavers)
+
+  const instructorTakeaways = getInstructorTakeaways(sessionReport, participants)
+
+  async function copySummary() {
+    const lines = [
+      sessionReport.sessionName,
+      formatDateTime(sessionReport.startedAt),
+      "",
+      ...instructorTakeaways,
+      "",
+      `Participants: ${sessionReport.participantCount ?? participants.length}`,
+      `Duration: ${formatDuration(sessionReport.durationMinutes)}`,
+      `Voice minutes (total): ${sessionReport.totalVoiceMinutes ?? "—"}`,
+      `Messages (total): ${sessionReport.totalMessages ?? "—"}`,
+    ]
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"))
+      toast.success("Summary copied to clipboard.")
+    } catch {
+      toast.error("Could not copy (browser blocked clipboard).")
+    }
+  }
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -150,11 +176,11 @@ export default function ReportDetailPage() {
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">{report.sessionName}</h1>
+          <h1 className="text-xl font-semibold text-foreground">{sessionReport.sessionName}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {formatDateTime(report.startedAt)}
-            {report.guildName && ` · ${report.guildName}`}
-            {report.voiceChannelName && ` · #${report.voiceChannelName}`}
+            {formatDateTime(sessionReport.startedAt)}
+            {sessionReport.guildName && ` · ${sessionReport.guildName}`}
+            {sessionReport.voiceChannelName && ` · #${sessionReport.voiceChannelName}`}
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:items-end sm:min-w-[220px]">
@@ -190,28 +216,48 @@ export default function ReportDetailPage() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
           title="Participants"
-          value={report.participantCount ?? participants.length}
+          value={sessionReport.participantCount ?? participants.length}
           icon={Users}
           variant="primary"
         />
         <MetricCard
           title="Duration"
-          value={formatDuration(report.durationMinutes)}
+          value={formatDuration(sessionReport.durationMinutes)}
           icon={Clock}
           variant="default"
         />
         <MetricCard
           title="Voice minutes"
-          value={report.totalVoiceMinutes != null ? `${report.totalVoiceMinutes}m` : "—"}
+          value={sessionReport.totalVoiceMinutes != null ? `${sessionReport.totalVoiceMinutes}m` : "—"}
           icon={Timer}
           variant="default"
         />
         <MetricCard
           title="Messages"
-          value={report.totalMessages ?? "—"}
+          value={sessionReport.totalMessages ?? "—"}
           icon={MessageSquare}
           variant="default"
         />
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Instructor takeaways</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Simple facts from this report—no AI-generated insights.
+            </p>
+          </div>
+          <Button type="button" variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => void copySummary()}>
+            <Copy className="h-3.5 w-3.5" />
+            Copy summary
+          </Button>
+        </div>
+        <ul className="mt-3 space-y-1.5 text-sm text-foreground list-disc pl-5">
+          {instructorTakeaways.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
       </div>
 
       {participants.length > 0 && (
@@ -317,6 +363,36 @@ function ParticipantRow({ p }: { p: ParticipantSummary }) {
       </div>
     </div>
   )
+}
+
+function getInstructorTakeaways(
+  report: ReportDetail,
+  participants: ParticipantSummary[]
+): string[] {
+  const lines: string[] = []
+  const n = report.participantCount ?? participants.length
+  if (n === 0) {
+    lines.push("No participant rows were recorded for this session.")
+  } else {
+    lines.push(`${n} participant(s) appear on this report.`)
+  }
+  const withVoice = participants.filter((p) => (p.voiceMinutes ?? 0) > 0).length
+  if (n > 0 && withVoice === 0) {
+    lines.push("No voice minutes were logged for listed participants.")
+  } else if (withVoice > 0) {
+    lines.push(`${withVoice} participant(s) had logged voice time.`)
+  }
+  if (report.totalMessages === 0) {
+    lines.push("Total counted messages from the report: 0.")
+  } else if (typeof report.totalMessages === "number" && report.totalMessages > 0) {
+    lines.push(`Total counted messages: ${report.totalMessages}.`)
+  }
+  if (report.totalVoiceMinutes === 0) {
+    lines.push("Reported total voice minutes for the session: 0.")
+  } else if (typeof report.totalVoiceMinutes === "number" && report.totalVoiceMinutes > 0) {
+    lines.push(`Reported total voice minutes: ${report.totalVoiceMinutes}m.`)
+  }
+  return lines
 }
 
 function InsightCard({

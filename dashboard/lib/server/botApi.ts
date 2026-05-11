@@ -113,6 +113,7 @@ export async function botPost<T = unknown>(
         ok: false,
         error: errObj?.error ?? `Bot API returned ${res.status}`,
         details: typeof parsed === "object" ? JSON.stringify(parsed) : String(parsed),
+        ...(parsed && typeof parsed === "object" ? { data: parsed as T } : {}),
       }
     }
 

@@ -94,8 +94,18 @@ export async function apiFetch<T = unknown>(
         ...(options?.headers ?? {}),
       },
     })
-    const json = (await res.json()) as ApiResponse<T>
-    return json
+    const json = (await res.json()) as ApiResponse<T> & Record<string, unknown>
+    if (!res.ok && json.ok === undefined) {
+      return {
+        ok: false,
+        error:
+          (typeof json.error === "string" && json.error) ||
+          `Request failed (${res.status})`,
+        details: typeof json.details === "string" ? json.details : undefined,
+        data: json.data as T | undefined,
+      }
+    }
+    return json as ApiResponse<T>
   } catch (err) {
     return {
       ok: false,

@@ -3,6 +3,7 @@ const commands = require('../commands');
 const logger = require('../utils/logger');
 const { parseArgs } = require('../utils/argParser');
 const db = require('../database/db');
+const { ChannelType } = require('discord.js');
 
 // Removed global mutex — it caused false "another command executing" errors
 // Each command handles its own concurrency if needed
@@ -26,9 +27,24 @@ class MockMessage {
             tag: context.user?.username || 'Dashboard',
             username: context.user?.username || 'Dashboard'
         };
+
+        const client = global.client;
+        const cache = client?.channels?.cache;
+
+        let voiceChannel = null;
+        if (context.voiceChannelId && cache) {
+            const vc = cache.get(context.voiceChannelId);
+            if (
+                vc &&
+                (vc.type === ChannelType.GuildVoice || vc.type === ChannelType.GuildStageVoice)
+            ) {
+                voiceChannel = vc;
+            }
+        }
+
         this.member = {
             id: context.user?.id || 'dashboard_user',
-            voice: { channel: null }, // Dashboard users aren't usually in a voice channel
+            voice: { channel: voiceChannel },
             permissions: {
                 has: () => true // Assume dashboard user has instructor perms
             },
@@ -45,7 +61,20 @@ class MockMessage {
                 }
             }
         };
-        this.channel = new MockChannel();
+
+        const textId = context.textChannelId || context.channel?.id;
+        let channelImpl = new MockChannel();
+        if (textId && cache) {
+            const real = cache.get(textId);
+            if (
+                real &&
+                typeof real.isTextBased === 'function' &&
+                real.isTextBased()
+            ) {
+                channelImpl = real;
+            }
+        }
+        this.channel = channelImpl;
         this.output = [];
     }
 
