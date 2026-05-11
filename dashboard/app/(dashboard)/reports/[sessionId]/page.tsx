@@ -169,7 +169,7 @@ export default function ReportDetailPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="p-4 md:p-6 lg:p-8 max-w-4xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
       <Link href="/reports" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-3.5 w-3.5" /> Back to reports
       </Link>
@@ -240,7 +240,7 @@ export default function ReportDetailPage() {
         />
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-5">
+      <div className="rounded-2xl border border-border bg-card p-5 md:p-6 shadow-sm transition-shadow hover:shadow-md">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-foreground">Instructor takeaways</p>
@@ -261,7 +261,7 @@ export default function ReportDetailPage() {
       </div>
 
       {participants.length > 0 && (
-        <div className="rounded-lg border border-border bg-card">
+        <div className="rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md overflow-hidden">
           <div className="px-5 py-3 border-b border-border">
             <p className="text-sm font-semibold text-foreground">All participants</p>
           </div>
@@ -323,17 +323,19 @@ export default function ReportDetailPage() {
 
 function ParticipantRow({ p }: { p: ParticipantSummary }) {
   return (
-    <div className="flex items-center gap-4 px-5 py-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted shrink-0">
-        <span className="text-xs font-medium text-muted-foreground">
-          {(p.displayName ?? p.username ?? "?").charAt(0).toUpperCase()}
-        </span>
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 px-5 py-4">
+      <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted shrink-0">
+          <span className="text-xs font-medium text-muted-foreground">
+            {(p.displayName ?? p.username ?? "?").charAt(0).toUpperCase()}
+          </span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground">{p.displayName ?? p.username}</p>
+          <p className="text-xs text-muted-foreground font-mono">{p.userId}</p>
+        </div>
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground">{p.displayName ?? p.username}</p>
-        <p className="text-xs text-muted-foreground font-mono">{p.userId}</p>
-      </div>
-      <div className="flex items-center gap-6 text-xs text-muted-foreground">
+      <div className="flex items-center gap-6 text-xs text-muted-foreground ml-11 sm:ml-0 mt-1 sm:mt-0 w-full sm:w-auto justify-start sm:justify-end flex-1">
         {p.voiceMinutes != null && (
           <span className="flex items-center gap-1">
             <Timer className="h-3 w-3" />
@@ -407,7 +409,7 @@ function InsightCard({
   items: ParticipantSummary[]
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div className="rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md overflow-hidden">
       <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
         <Icon className={cn("h-4 w-4", iconClass)} />
         <p className="text-sm font-semibold text-foreground">{title}</p>

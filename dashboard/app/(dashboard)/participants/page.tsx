@@ -97,7 +97,7 @@ export default function ParticipantsPage() {
   }, [participants, filter, search, hideBots])
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
       <PageHeader
         title="Participants"
         description="Tracked users and their activity across sessions."
@@ -115,7 +115,7 @@ export default function ParticipantsPage() {
         }
       />
 
-      <p className="text-sm text-muted-foreground mb-4 rounded-lg border border-border bg-accent/20 px-4 py-3">
+      <p className="text-sm text-muted-foreground mb-4 rounded-2xl border border-border bg-accent/20 px-5 py-4 shadow-sm">
         Live Discord members for the selected server. Tracked session stats appear when the bot has recorded activity for those users.
       </p>
 
@@ -197,12 +197,13 @@ export default function ParticipantsPage() {
               key={p.userId}
               onClick={() => setSelected(selected?.userId === p.userId ? null : p)}
               className={cn(
-                "w-full flex items-center gap-4 rounded-lg border px-5 py-3 text-left transition-colors",
+                "w-full flex flex-col sm:flex-row sm:items-center gap-4 rounded-2xl border px-5 py-4 text-left transition-shadow shadow-sm hover:shadow-md",
                 selected?.userId === p.userId
-                  ? "border-primary/30 bg-accent/30"
-                  : "border-border bg-card hover:border-primary/20 hover:bg-accent/10"
+                  ? "border-primary/30 bg-primary/5"
+                  : "border-border bg-card"
               )}
             >
+              <div className="flex items-center gap-4 w-full sm:w-auto">
               {/* Avatar */}
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted shrink-0">
                 <span className="text-sm font-medium text-muted-foreground">
@@ -225,9 +226,10 @@ export default function ParticipantsPage() {
                   )}
                 </p>
               </div>
+              </div>
 
               {/* Stats */}
-              <div className="hidden sm:flex items-center gap-5 text-xs text-muted-foreground">
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-5 text-xs text-muted-foreground mt-2 sm:mt-0 w-full sm:w-auto justify-start sm:justify-end flex-1 border-t sm:border-0 border-border pt-3 sm:pt-0">
                 {p.sessionsAttended != null && (
                   <span>{p.sessionsAttended} sessions</span>
                 )}
@@ -260,7 +262,7 @@ export default function ParticipantsPage() {
               </div>
 
               {p.lastActive && (
-                <span className="hidden lg:block text-xs text-muted-foreground shrink-0">
+                <span className="hidden lg:block text-xs text-muted-foreground shrink-0 ml-4">
                   {formatTimeAgo(p.lastActive)}
                 </span>
               )}
@@ -271,7 +273,7 @@ export default function ParticipantsPage() {
 
       {/* Detail drawer */}
       {selected && (
-        <div className="mt-4 rounded-lg border border-primary/20 bg-card p-5">
+        <div className="mt-4 rounded-2xl border border-primary/20 bg-card p-5 md:p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent">

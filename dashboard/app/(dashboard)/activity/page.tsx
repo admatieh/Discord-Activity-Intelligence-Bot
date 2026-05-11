@@ -100,7 +100,7 @@ export default function ActivityPage() {
   }, [filtered])
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
       <PageHeader
         title="Activity"
         description="Human-readable session and bot events. Technical logs live under Advanced → Technical Logs."
@@ -153,7 +153,7 @@ export default function ActivityPage() {
             </option>
           ))}
         </select>
-        <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex sm:ml-auto items-center gap-1.5 text-xs text-muted-foreground w-full sm:w-auto justify-end mt-2 sm:mt-0">
           <span>Show:</span>
           {LIMIT_OPTIONS.map((n) => (
             <button
@@ -211,7 +211,7 @@ export default function ActivityPage() {
 
 function ActivityRow({ event }: { event: ActivityEvent }) {
   return (
-    <div className="flex items-start gap-4 rounded-lg border border-border bg-card px-5 py-3.5">
+    <div className="flex items-start gap-4 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm transition-shadow hover:shadow-md">
       <SeverityDot severity={event.severity} />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-foreground">{event.label}</p>

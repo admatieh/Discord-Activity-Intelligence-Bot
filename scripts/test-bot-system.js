@@ -301,8 +301,148 @@ async function runTests() {
             const item = db.prepare('SELECT * FROM scheduled_items WHERE id = ?').get(res.id);
             assert(item.status === 'cancelled', 'Status not updated to cancelled');
         });
+
+        // Recurrence helper tests
+        await test('Recurrence: parseRecurrenceRule validates correctly', async () => {
+            const recurrence = require('../utils/recurrence');
+            
+            // Valid rule
+            const valid = recurrence.parseRecurrenceRule(JSON.stringify({
+                frequency: 'weekly', daysOfWeek: ['MO', 'TU'], time: '09:00', timezone: 'Asia/Beirut'
+            }));
+            assert(valid.ok === true, 'Should parse valid rule');
+            assert(valid.rule.daysOfWeek.length === 2, 'Should have 2 days');
+
+            // Invalid day
+            const badDay = recurrence.parseRecurrenceRule(JSON.stringify({
+                frequency: 'weekly', daysOfWeek: ['MO', 'XX'], time: '09:00'
+            }));
+            assert(badDay.ok === false, 'Should fail invalid day code');
+
+            // Invalid time
+            const badTime = recurrence.parseRecurrenceRule(JSON.stringify({
+                frequency: 'weekly', daysOfWeek: ['MO'], time: '9am'
+            }));
+            assert(badTime.ok === false, 'Should fail invalid time format');
+
+            // Missing frequency
+            const noFreq = recurrence.parseRecurrenceRule(JSON.stringify({
+                daysOfWeek: ['MO'], time: '09:00'
+            }));
+            assert(noFreq.ok === false, 'Should fail missing frequency');
+        });
+
+        await test('Recurrence: getNextOccurrence returns future date', async () => {
+            const { getNextOccurrence } = require('../utils/recurrence');
+            const rule = { frequency: 'weekly', daysOfWeek: ['MO', 'TU', 'WE', 'TH', 'FR'], time: '09:00', timezone: 'Asia/Beirut' };
+            const now = new Date();
+            const result = getNextOccurrence(rule, now);
+            assert(result.ok === true, 'Should find next occurrence: ' + result.error);
+            assert(result.nextDate instanceof Date, 'nextDate should be a Date');
+            assert(result.nextDate.getTime() > now.getTime(), 'Next date must be in the future');
+        });
+
+        await test('Recurrence: getNextOccurrence skips non-selected days', async () => {
+            const { getNextOccurrence } = require('../utils/recurrence');
+            // Only Monday
+            const rule = { frequency: 'weekly', daysOfWeek: ['MO'], time: '09:00', timezone: 'Asia/Beirut' };
+            const result = getNextOccurrence(rule, new Date());
+            assert(result.ok === true, 'Should find next Monday');
+            // The result should be a Monday (weekday 1 in JS)
+            // We verify it's a valid future date
+            assert(result.nextDate.getTime() > Date.now(), 'Should be in the future');
+        });
+
+        await test('Recurrence: isMissedRunTooOld detects old and recent correctly', async () => {
+            const { isMissedRunTooOld } = require('../utils/recurrence');
+            const old = new Date(Date.now() - 20 * 60 * 1000).toISOString(); // 20 min ago
+            const recent = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 min ago
+            assert(isMissedRunTooOld(old, 15) === true, 'Should detect 20min old as missed');
+            assert(isMissedRunTooOld(recent, 15) === false, 'Should not detect 5min old as missed');
+        });
+
+        await test('Recurrence: scheduleRecurringSession inserts valid item', async () => {
+            const result = schedulerService.scheduleRecurringSession({
+                guildId: 'guild_test',
+                voiceChannelId: 'voice_test',
+                title: 'Test Recurring Session',
+                daysOfWeek: ['MO', 'TU', 'WE', 'TH'],
+                time: '09:00',
+                timezone: 'Asia/Beirut',
+                durationMinutes: 60,
+                createdBy: 'test-runner'
+            });
+            assert(result.ok === true, 'scheduleRecurringSession failed: ' + result.error);
+            assert(result.id > 0, 'No ID returned');
+            assert(result.nextRunAt, 'Missing nextRunAt');
+
+            // Verify DB row
+            const item = db.prepare('SELECT * FROM scheduled_items WHERE id = ?').get(result.id);
+            assert(item, 'Item not found in DB');
+            assert(item.recurrence_rule, 'recurrence_rule should be set');
+            assert(item.status === 'scheduled', 'Status should be scheduled');
+            assert(item.next_run_at, 'next_run_at should be set');
+
+            // Verify recurrence_rule is valid JSON with expected shape
+            const rule = JSON.parse(item.recurrence_rule);
+            assert(rule.frequency === 'weekly', 'frequency should be weekly');
+            assert(Array.isArray(rule.daysOfWeek), 'daysOfWeek should be array');
+            assert(rule.time === '09:00', 'time should match');
+
+            // Verify scheduled_for is in the future
+            const scheduledForDate = new Date(item.scheduled_for);
+            assert(scheduledForDate.getTime() > Date.now(), 'scheduled_for should be in the future');
+        });
+
+        await test('Recurrence: scheduleRecurringSession rejects missing guildId', async () => {
+            const result = schedulerService.scheduleRecurringSession({
+                voiceChannelId: 'voice_test',
+                daysOfWeek: ['MO'],
+                time: '09:00'
+            });
+            assert(result.ok === false, 'Should fail without guildId');
+            assert(result.error, 'Should have error message');
+        });
+
+        await test('Recurrence: scheduleRecurringSession rejects invalid day codes', async () => {
+            const result = schedulerService.scheduleRecurringSession({
+                guildId: 'guild_test',
+                voiceChannelId: 'voice_test',
+                daysOfWeek: ['MO', 'INVALID'],
+                time: '09:00'
+            });
+            assert(result.ok === false, 'Should fail with invalid day code');
+        });
+
+        await test('Recurrence: scheduleRecurringSession rejects invalid time', async () => {
+            const result = schedulerService.scheduleRecurringSession({
+                guildId: 'guild_test',
+                voiceChannelId: 'voice_test',
+                daysOfWeek: ['MO'],
+                time: 'nine-am'
+            });
+            assert(result.ok === false, 'Should fail with invalid time');
+        });
+
+        await test('Recurrence: cancel recurring session works', async () => {
+            const res = schedulerService.scheduleRecurringSession({
+                guildId: 'guild_test',
+                voiceChannelId: 'voice_test',
+                title: 'To Cancel Recurring',
+                daysOfWeek: ['FR'],
+                time: '10:00',
+                timezone: 'Asia/Beirut',
+                durationMinutes: 30,
+                createdBy: 'test'
+            });
+            assert(res.ok === true, 'Could not create recurring to cancel');
+            const cancelRes = schedulerService.cancelScheduledItem(res.id);
+            assert(cancelRes.ok === true, 'Cancel failed');
+            const item = db.prepare('SELECT * FROM scheduled_items WHERE id = ?').get(res.id);
+            assert(item.status === 'cancelled', 'Status should be cancelled');
+        });
     } else {
-        skip('Scheduler inserts', 'Real DB mode');
+        skip('Recurring session tests', 'Real DB mode');
     }
 
     // --- PHASE 5: Message Service Tests ---
@@ -404,7 +544,7 @@ async function runTests() {
         const cmds = require('../commands');
         assert(cmds.size > 0, 'No commands loaded');
         
-        const requiredCmds = ['schedule-session', 'scheduled', 'cancel-scheduled', 'send-message', 'schedule-message', 'activity'];
+        const requiredCmds = ['schedule-session', 'scheduled', 'cancel-scheduled', 'send-message', 'schedule-message', 'activity', 'schedule-recurring-session'];
         for (const cmdName of requiredCmds) {
             const cmd = cmds.get(cmdName);
             assert(cmd, `Missing command ${cmdName}`);

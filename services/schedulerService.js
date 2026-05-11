@@ -12,6 +12,7 @@
 
 const db = require('../database/db');
 const logger = require('../utils/logger');
+const { parseRecurrenceRule, getNextOccurrence, isMissedRunTooOld, validateRecurringSessionInput, buildWeeklyRecurrenceRule, formatRecurrenceRuleHuman, DEFAULT_TIMEZONE, DEFAULT_DURATION_MINUTES } = require('../utils/recurrence');
 
 let client = null;       // Discord client reference — set via initScheduler
 let pollInterval = null; // setInterval handle
@@ -19,6 +20,7 @@ let isRunning = false;   // concurrency lock
 
 const POLL_INTERVAL_MS = 20_000;        // 20 seconds
 const STALE_RUNNING_THRESHOLD_MS = 300_000; // 5 minutes — stale "running" jobs get re-queued
+const RECURRING_MISSED_GRACE_MINUTES = 15; // skip & reschedule if missed by more than this
 
 // ---------------------------------------------------------------------------
 // DB helpers
@@ -72,6 +74,45 @@ function markFailed(id, errorMsg) {
 }
 
 // ---------------------------------------------------------------------------
+// Recurring item helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * After a recurring item runs (success or skip), advance its schedule.
+ * Updates: scheduled_for, next_run_at, last_run_at, status='scheduled', clears error.
+ */
+function advanceRecurringItem(id, rule, nowDate, errorMsg) {
+    const parsed = parseRecurrenceRule(rule);
+    if (!parsed.ok) {
+        logger.warn(`[Scheduler] Cannot advance recurring item #${id}: ${parsed.error}`);
+        markFailed(id, `Cannot parse recurrence rule: ${parsed.error}`);
+        return;
+    }
+    const next = getNextOccurrence(parsed.rule, nowDate || new Date());
+    if (!next.ok) {
+        logger.warn(`[Scheduler] No next occurrence for recurring item #${id}: ${next.error}`);
+        markFailed(id, `No next occurrence: ${next.error}`);
+        return;
+    }
+    const nextIso = next.nextDate.toISOString();
+    try {
+        db.prepare(`
+            UPDATE scheduled_items
+            SET scheduled_for = ?,
+                next_run_at   = ?,
+                last_run_at   = datetime('now'),
+                status        = 'scheduled',
+                error         = ?,
+                updated_at    = datetime('now')
+            WHERE id = ?
+        `).run(nextIso, nextIso, errorMsg || null, id);
+        logger.log(`[Scheduler] Recurring item #${id} rescheduled → ${nextIso}`);
+    } catch (err) {
+        logger.error(`[Scheduler] advanceRecurringItem DB error for #${id}: ${err.message}`);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Execute a scheduled session
 // ---------------------------------------------------------------------------
 
@@ -92,18 +133,30 @@ async function executeScheduledSession(item) {
         );
 
         if (!result.success) {
-            markFailed(item.id, result.message);
-            logger.warn(`[Scheduler] Session start failed for item #${item.id}: ${result.message}`);
-
-            // Write activity event
-            writeActivityEvent({
-                type: 'SCHEDULED_SESSION_FAILED',
-                human_label: `Scheduled session "${item.title || 'Untitled'}" failed to start`,
-                guild_id: item.guild_id,
-                session_id: null,
-                severity: 'error',
-                metadata: { itemId: item.id, error: result.message }
-            });
+            const errorMsg = result.message;
+            if (item.recurrence_rule) {
+                // One failure should not kill recurring schedule — reschedule and store error
+                advanceRecurringItem(item.id, item.recurrence_rule, new Date(), errorMsg);
+                writeActivityEvent({
+                    type: 'RECURRING_SESSION_FAILED',
+                    human_label: `Recurring session "${item.title || 'Untitled'}" failed — rescheduled`,
+                    guild_id: item.guild_id,
+                    session_id: null,
+                    severity: 'error',
+                    metadata: { itemId: item.id, error: errorMsg }
+                });
+            } else {
+                markFailed(item.id, errorMsg);
+                writeActivityEvent({
+                    type: 'SCHEDULED_SESSION_FAILED',
+                    human_label: `Scheduled session "${item.title || 'Untitled'}" failed to start`,
+                    guild_id: item.guild_id,
+                    session_id: null,
+                    severity: 'error',
+                    metadata: { itemId: item.id, error: errorMsg }
+                });
+            }
+            logger.warn(`[Scheduler] Session start failed for item #${item.id}: ${errorMsg}`);
             return;
         }
 
@@ -137,6 +190,19 @@ async function executeScheduledSession(item) {
         }
 
         markCompleted(item.id);
+
+        // If recurring, reschedule instead of leaving as completed
+        if (item.recurrence_rule) {
+            advanceRecurringItem(item.id, item.recurrence_rule, new Date());
+            writeActivityEvent({
+                type: 'RECURRING_SESSION_NEXT_RUN_UPDATED',
+                human_label: `Recurring session "${item.title || 'Untitled'}" completed — rescheduled`,
+                guild_id: item.guild_id,
+                session_id: result.sessionId,
+                severity: 'info',
+                metadata: { itemId: item.id, sessionId: result.sessionId }
+            });
+        }
 
         writeActivityEvent({
             type: 'SCHEDULED_SESSION_STARTED',
@@ -257,6 +323,40 @@ async function executeDueItems() {
         `).all(now);
 
         for (const item of dueItems) {
+            // For recurring items, check if we missed the run beyond the grace period
+            if (item.recurrence_rule) {
+                if (isMissedRunTooOld(item.scheduled_for, RECURRING_MISSED_GRACE_MINUTES)) {
+                    logger.warn(`[Scheduler] Recurring item #${item.id} missed by >${RECURRING_MISSED_GRACE_MINUTES}m — skipping, rescheduling`);
+                    writeActivityEvent({
+                        type: 'RECURRING_SESSION_SKIPPED',
+                        human_label: `Recurring session "${item.title || 'Untitled'}" skipped (missed grace window)`,
+                        guild_id: item.guild_id,
+                        severity: 'warning',
+                        metadata: { itemId: item.id, scheduledFor: item.scheduled_for, graceMinutes: RECURRING_MISSED_GRACE_MINUTES }
+                    });
+                    advanceRecurringItem(item.id, item.recurrence_rule, new Date());
+                    continue;
+                }
+
+                // Check if a session is already active in this voice channel → skip this run
+                const sessionService = require('../modules/sessions/sessionService');
+                const active = sessionService.getActiveSessionForChannel
+                    ? sessionService.getActiveSessionForChannel(item.voice_channel_id)
+                    : null;
+                if (active) {
+                    logger.warn(`[Scheduler] Recurring item #${item.id} skipped — session already active in channel ${item.voice_channel_id}`);
+                    writeActivityEvent({
+                        type: 'RECURRING_SESSION_SKIPPED',
+                        human_label: `Recurring session "${item.title || 'Untitled'}" skipped — session already active`,
+                        guild_id: item.guild_id,
+                        severity: 'info',
+                        metadata: { itemId: item.id, activeSessionId: active.id }
+                    });
+                    advanceRecurringItem(item.id, item.recurrence_rule, new Date());
+                    continue;
+                }
+            }
+
             // Mark running before execution to prevent double-run
             markRunning(item.id);
 
@@ -341,6 +441,89 @@ function scheduleSession(input) {
         return { ok: true, id };
     } catch (err) {
         logger.error(`[Scheduler] scheduleSession error: ${err.message}`);
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
+ * Schedule a recurring session.
+ * @param {{ guildId, voiceChannelId, textChannelId, title, daysOfWeek, time, timezone, durationMinutes, createdBy, tracking, options }} input
+ * @returns {{ ok, id, nextRunAt, error }}
+ */
+function scheduleRecurringSession(input) {
+    try {
+        const {
+            guildId, voiceChannelId, textChannelId, title,
+            daysOfWeek, time, timezone, durationMinutes,
+            createdBy, tracking, options
+        } = input;
+
+        // Input validation
+        const validation = validateRecurringSessionInput({ guildId, voiceChannelId, daysOfWeek, time, timezone, durationMinutes });
+        if (!validation.ok) return validation;
+
+        const safeGuildId = String(guildId);
+        const safeVoiceChannelId = String(voiceChannelId);
+        const safeTextChannelId = textChannelId ? String(textChannelId) : null;
+        const safeTitle = title ? String(title) : 'Recurring Session';
+        const safeCreatedBy = createdBy ? String(createdBy) : 'dashboard';
+        const safeDuration = durationMinutes ? Number(durationMinutes) : DEFAULT_DURATION_MINUTES;
+        const safeTz = timezone || DEFAULT_TIMEZONE;
+
+        // Build recurrence rule
+        const ruleResult = buildWeeklyRecurrenceRule({ daysOfWeek, time, timezone: safeTz });
+        if (!ruleResult.ok) return ruleResult;
+        const rule = ruleResult.rule;
+        const ruleJson = JSON.stringify(rule);
+
+        // Calculate first occurrence
+        const nextResult = getNextOccurrence(rule, new Date());
+        if (!nextResult.ok) return { ok: false, error: nextResult.error };
+        const nextIso = nextResult.nextDate.toISOString();
+
+        // Store payload
+        const payloadJson = JSON.stringify({ tracking: tracking || {}, options: options || {} });
+
+        const result = db.prepare(`
+            INSERT INTO scheduled_items
+                (type, title, guild_id, voice_channel_id, text_channel_id,
+                 scheduled_for, timezone, duration_minutes, payload_json,
+                 recurrence_rule, next_run_at, status, created_by, created_at)
+            VALUES ('session', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, datetime('now'))
+        `).run(
+            safeTitle,
+            safeGuildId,
+            safeVoiceChannelId,
+            safeTextChannelId,
+            nextIso,
+            safeTz,
+            safeDuration,
+            payloadJson,
+            ruleJson,
+            nextIso,
+            safeCreatedBy
+        );
+
+        const id = Number(result.lastInsertRowid);
+        const humanRule = formatRecurrenceRuleHuman(rule);
+
+        writeActivityEvent({
+            type: 'RECURRING_SESSION_CREATED',
+            human_label: `Recurring session "${safeTitle}" scheduled for ${humanRule}`,
+            guild_id: safeGuildId,
+            severity: 'info',
+            metadata: { itemId: id, daysOfWeek, time, timezone: safeTz, nextRunAt: nextIso }
+        });
+
+        logger.log(`[Scheduler] Recurring session created: item #${id}, next run ${nextIso}`);
+        return {
+            ok: true,
+            id,
+            nextRunAt: nextIso,
+            rule
+        };
+    } catch (err) {
+        logger.error(`[Scheduler] scheduleRecurringSession error: ${err.message}`);
         return { ok: false, error: err.message };
     }
 }
@@ -536,6 +719,7 @@ module.exports = {
     stopScheduler,
     scheduleSession,
     scheduleMessage,
+    scheduleRecurringSession,
     cancelScheduledItem,
     getScheduledItems,
     executeDueItems,

@@ -97,6 +97,24 @@ export function mapScheduledRow(row: Record<string, unknown>): ScheduledItem {
     type === "session"
       ? (row.voice_channel_id as string | undefined)
       : (row.text_channel_id as string | undefined)
+
+  // Parse recurrence_rule if present
+  let recurrenceRule: ScheduledItem["recurrenceRule"] | undefined
+  const ruleRaw = row.recurrence_rule
+  if (ruleRaw && typeof ruleRaw === "string") {
+    try {
+      const parsed = JSON.parse(ruleRaw)
+      if (parsed && parsed.frequency === "weekly" && Array.isArray(parsed.daysOfWeek)) {
+        recurrenceRule = {
+          frequency: "weekly",
+          daysOfWeek: parsed.daysOfWeek as string[],
+          time: String(parsed.time ?? ""),
+          timezone: String(parsed.timezone ?? "Asia/Beirut"),
+        }
+      }
+    } catch { /* ignore malformed rule */ }
+  }
+
   return {
     id,
     type,
@@ -109,6 +127,10 @@ export function mapScheduledRow(row: Record<string, unknown>): ScheduledItem {
       typeof row.duration_minutes === "number" ? row.duration_minutes : undefined,
     createdBy: row.created_by ? String(row.created_by) : undefined,
     errorMessage: row.error ? String(row.error) : undefined,
+    recurring: !!recurrenceRule,
+    recurrenceRule,
+    nextRunAt: row.next_run_at ? String(row.next_run_at) : undefined,
+    lastRunAt: row.last_run_at ? String(row.last_run_at) : undefined,
   }
 }
 

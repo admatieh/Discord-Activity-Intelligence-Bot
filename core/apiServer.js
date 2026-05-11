@@ -367,6 +367,39 @@ function startApiServer(client) {
             }
 
             // ----------------------------------------------------------------
+            // POST /api/actions/schedule/recurring-session
+            // ----------------------------------------------------------------
+            if (pathname === '/api/actions/schedule/recurring-session' && method === 'POST') {
+                const body = await readBody(req);
+                const result = schedulerService.scheduleRecurringSession({
+                    guildId: body.guildId,
+                    voiceChannelId: body.voiceChannelId,
+                    textChannelId: body.textChannelId,
+                    title: body.title,
+                    daysOfWeek: body.daysOfWeek,
+                    time: body.time,
+                    timezone: body.timezone,
+                    durationMinutes: body.durationMinutes,
+                    createdBy: body.requestedBy || body.createdBy || 'dashboard',
+                    tracking: body.tracking,
+                    options: body.options
+                });
+                if (!result.ok) return sendJson(res, 400, result);
+                return sendJson(res, 200, {
+                    ok: true,
+                    message: 'Recurring session scheduled.',
+                    scheduledItem: {
+                        id: result.id,
+                        title: body.title || 'Recurring Session',
+                        nextRunAt: result.nextRunAt,
+                        daysOfWeek: body.daysOfWeek,
+                        time: body.time,
+                        timezone: body.timezone || 'Asia/Beirut'
+                    }
+                });
+            }
+
+            // ----------------------------------------------------------------
             // POST /api/actions/schedule/message
             // ----------------------------------------------------------------
             if (pathname === '/api/actions/schedule/message' && method === 'POST') {

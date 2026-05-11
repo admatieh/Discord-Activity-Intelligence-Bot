@@ -70,7 +70,7 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
       <PageHeader
         title="Reports"
         description="Session attendance and participation reports."
@@ -108,7 +108,7 @@ export default function ReportsPage() {
           {reports.map((report) => (
             <div
               key={report.sessionId}
-              className="flex items-center gap-4 rounded-lg border border-border bg-card px-5 py-4"
+              className="flex flex-col sm:flex-row items-start gap-4 rounded-2xl border border-border bg-card px-5 py-5 shadow-sm transition-shadow hover:shadow-md"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-md bg-muted shrink-0">
                 <FileText className="h-4 w-4 text-muted-foreground" />
@@ -136,17 +136,19 @@ export default function ReportsPage() {
                   ))}
                 </ul>
               </div>
-              <StatusBadge status={report.status} />
-              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                  <StatusBadge status={report.status} />
+                </div>
+              <div className="flex w-full sm:w-auto items-center gap-2 shrink-0 border-t sm:border-0 border-border pt-3 sm:pt-0 mt-3 sm:mt-0">
                 {report.status === "available" && (
-                  <Button size="sm" variant="outline" asChild className="h-7 text-xs">
+                  <Button size="sm" variant="outline" asChild className="flex-1 sm:flex-none h-8 text-xs">
                     <Link href={`/reports/${report.sessionId}`}>View</Link>
                   </Button>
                 )}
                 <Button
                   size="sm"
-                  variant="ghost"
-                  className="h-7 text-xs"
+                  variant="secondary"
+                  className="flex-1 sm:flex-none h-8 text-xs"
                   disabled={generating === report.sessionId}
                   onClick={() => handleGenerate(report.sessionId)}
                 >

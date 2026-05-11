@@ -134,7 +134,7 @@ export default function HomePage() {
   const dbConnected = data.database?.connected === true
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -194,7 +194,7 @@ export default function HomePage() {
       </div>
 
       {!loading && !data.activeSession && (
-        <div className="rounded-lg border border-dashed border-border bg-card/60 px-4 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="rounded-2xl border border-dashed border-border bg-card/60 px-5 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-sm transition-shadow hover:shadow-md">
           <div>
             <p className="text-sm font-medium text-foreground">No live session right now</p>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -210,7 +210,7 @@ export default function HomePage() {
 
       {/* Active session card */}
       {data.activeSession && (
-        <div className="rounded-lg border border-primary/20 bg-accent/30 p-5">
+        <div className="rounded-2xl border border-primary/20 bg-primary/5 p-5 shadow-sm transition-shadow hover:shadow-md">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
@@ -249,7 +249,7 @@ export default function HomePage() {
             <Link
               key={item.href + item.label}
               href={item.href}
-              className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 hover:border-primary/30 hover:bg-accent/20 transition-colors"
+              className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm hover:shadow-md hover:border-primary/30 transition-all duration-200"
             >
               <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg", item.color)}>
                 <item.icon className="h-4 w-4" />
@@ -295,7 +295,7 @@ export default function HomePage() {
               upcomingScheduled.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3"
+                  className="flex items-center gap-4 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm transition-shadow hover:shadow-md"
                 >
                   <div className="flex h-8 w-8 items-center justify-center rounded-md bg-accent shrink-0">
                     {item.type === "session" ? (
@@ -342,7 +342,7 @@ export default function HomePage() {
               />
             ) : (
               data.activity.slice(0, 6).map((event) => (
-                <div key={event.id} className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
+                <div key={event.id} className="flex items-start gap-3 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm transition-shadow hover:shadow-md">
                   <SeverityDot severity={event.severity} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-foreground">{event.label}</p>
@@ -388,7 +388,7 @@ export default function HomePage() {
               <Link
                 key={report.sessionId}
                 href={`/reports/${report.sessionId}`}
-                className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 hover:border-primary/30 hover:bg-accent/10 transition-colors"
+                className="flex items-center gap-4 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm hover:shadow-md hover:border-primary/30 transition-all duration-200"
               >
                 <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted shrink-0">
                   <FileText className="h-3.5 w-3.5 text-muted-foreground" />

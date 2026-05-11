@@ -51,7 +51,7 @@ const advancedNav: NavItem[] = [
   { label: "Settings", href: "/settings", icon: Settings },
 ]
 
-export function AppSidebar() {
+export function AppSidebar({ className, onNavigate }: { className?: string; onNavigate?: () => void }) {
   const pathname = usePathname()
   const [advancedOpen, setAdvancedOpen] = useState(
     advancedNav.some((item) => pathname.startsWith(item.href))
@@ -59,7 +59,7 @@ export function AppSidebar() {
   const { status } = useBotStatus()
 
   return (
-    <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-border bg-sidebar">
+    <aside className={cn("flex h-full w-60 shrink-0 flex-col border-r border-border bg-sidebar", className)}>
       <div className="flex items-center gap-2.5 border-b border-border px-5 py-4">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
           <Bot className="h-4 w-4 text-primary-foreground" />
@@ -91,6 +91,7 @@ export function AppSidebar() {
                 <li key={item.href}>
                   <Link
                     href={item.href}
+                    onClick={onNavigate}
                     className={cn(
                       "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors",
                       isActive
@@ -133,6 +134,7 @@ export function AppSidebar() {
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      onClick={onNavigate}
                       className={cn(
                         "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors",
                         isActive

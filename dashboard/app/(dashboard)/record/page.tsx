@@ -190,7 +190,7 @@ export default function RecordSessionPage() {
   if (guildsLoading) return <LoadingState message="Loading Discord servers…" className="mt-20" />
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
       <PageHeader
         title="Record a Session"
         description="Start or schedule a voice session recording."
@@ -210,8 +210,8 @@ export default function RecordSessionPage() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Session name */}
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Session title</h2>
+        <div className="rounded-2xl border border-border bg-card p-5 md:p-6 space-y-4 shadow-sm transition-shadow hover:shadow-md">
+          <h2 className="text-base font-semibold text-foreground border-b border-border pb-2">1. Session Details</h2>
           <div className="space-y-1.5">
             <Label htmlFor="session-name">Session title <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <Input
@@ -224,8 +224,8 @@ export default function RecordSessionPage() {
         </div>
 
         {/* Server and channels */}
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Where</h2>
+        <div className="rounded-2xl border border-border bg-card p-5 md:p-6 space-y-4 shadow-sm transition-shadow hover:shadow-md">
+          <h2 className="text-base font-semibold text-foreground border-b border-border pb-2">2. Where</h2>
           <div className="space-y-1.5">
             <Label>Discord server</Label>
             <Select value={selectedGuildId} onValueChange={setSelectedGuildId}>
@@ -301,8 +301,8 @@ export default function RecordSessionPage() {
         </div>
 
         {/* Timing */}
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">2. When</h2>
+        <div className="rounded-2xl border border-border bg-card p-5 md:p-6 space-y-4 shadow-sm transition-shadow hover:shadow-md">
+          <h2 className="text-base font-semibold text-foreground border-b border-border pb-2">3. When</h2>
 
           <div className="flex gap-2">
             {(["now", "later"] as StartMode[]).map((mode) => (
@@ -384,8 +384,8 @@ export default function RecordSessionPage() {
         </div>
 
         {/* Tracking */}
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">3. What to track</h2>
+        <div className="rounded-2xl border border-border bg-card p-5 md:p-6 space-y-4 shadow-sm transition-shadow hover:shadow-md">
+          <h2 className="text-base font-semibold text-foreground border-b border-border pb-2">4. What to track</h2>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {(Object.keys(tracking) as Array<keyof typeof tracking>).map((key) => (
               <label key={key} className="flex items-center gap-2.5 cursor-pointer">
@@ -400,8 +400,8 @@ export default function RecordSessionPage() {
         </div>
 
         {/* Options */}
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Additional options</h2>
+        <div className="rounded-2xl border border-border bg-card p-5 md:p-6 space-y-4 shadow-sm transition-shadow hover:shadow-md">
+          <h2 className="text-base font-semibold text-foreground border-b border-border pb-2">5. Additional options</h2>
           <div className="space-y-2">
             {(Object.keys(options) as Array<keyof typeof options>).map((key) => (
               <label key={key} className="flex items-center gap-2.5 cursor-pointer">
@@ -449,11 +449,11 @@ export default function RecordSessionPage() {
         )}
 
         {/* Submit */}
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 pt-2">
           <Button
             type="submit"
             disabled={!canSubmit}
-            className="gap-2"
+            className="w-full sm:w-auto gap-2"
           >
             <Radio className="h-4 w-4" />
             {startMode === "now" ? "Start Recording" : "Schedule Recording"}
@@ -461,6 +461,7 @@ export default function RecordSessionPage() {
           <Button
             type="button"
             variant="outline"
+            className="w-full sm:w-auto"
             onClick={() => {
               setSessionName("")
               setSelectedVoice("")

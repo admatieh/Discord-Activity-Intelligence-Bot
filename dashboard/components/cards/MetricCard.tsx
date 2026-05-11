@@ -34,7 +34,7 @@ export default function MetricCard({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border bg-card p-5 flex flex-col gap-3",
+        "rounded-2xl border border-border bg-card p-5 flex flex-col gap-3 shadow-sm transition-shadow hover:shadow-md",
         className
       )}
     >

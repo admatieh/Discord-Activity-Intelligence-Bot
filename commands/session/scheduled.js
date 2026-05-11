@@ -3,6 +3,7 @@ const { requireInstructor } = require('../../utils/permissions');
 // Usage: !scheduled [--type session|message] [--status scheduled|completed|failed|cancelled]
 
 const schedulerService = require('../../services/schedulerService');
+const { parseRecurrenceRule, DAY_CODE_TO_SHORT } = require('../../utils/recurrence');
 
 module.exports = {
     name: 'scheduled',
@@ -32,7 +33,22 @@ module.exports = {
         let text = `📅 **Scheduled Items** (${items.length})\n\n`;
         for (const item of items) {
             const dt = new Date(item.scheduled_for).toLocaleString();
-            text += `**#${item.id}** [${item.type}] ${item.title || '(no title)'} — ${dt} — ${item.status}\n`;
+            const isRecurring = !!item.recurrence_rule;
+
+            if (isRecurring) {
+                const parsed = parseRecurrenceRule(item.recurrence_rule);
+                let recurrenceStr = '🔁 recurring';
+                if (parsed.ok) {
+                    const days = parsed.rule.daysOfWeek.map(d => DAY_CODE_TO_SHORT[d] || d).join(', ');
+                    recurrenceStr = `🔁 ${days} at ${parsed.rule.time} ${parsed.rule.timezone}`;
+                }
+                const nextRun = item.next_run_at ? new Date(item.next_run_at).toLocaleString() : dt;
+                text += `**#${item.id}** [${item.type}] **${item.title || '(no title)'}**\n`;
+                text += `   ${recurrenceStr}\n`;
+                text += `   Next run: ${nextRun} — ${item.status}\n\n`;
+            } else {
+                text += `**#${item.id}** [${item.type}] ${item.title || '(no title)'} — ${dt} — ${item.status}\n`;
+            }
         }
         return text.trim();
     }

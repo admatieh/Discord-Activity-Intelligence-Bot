@@ -72,6 +72,16 @@ export interface ScheduledItem {
   createdBy?: string
   errorMessage?: string
   payload?: Record<string, unknown>
+  // Recurring session fields
+  recurring?: boolean
+  recurrenceRule?: {
+    frequency: "weekly"
+    daysOfWeek: string[]
+    time: string
+    timezone: string
+  }
+  nextRunAt?: string
+  lastRunAt?: string
 }
 
 // ─── Messages ────────────────────────────────────────────────────────────────

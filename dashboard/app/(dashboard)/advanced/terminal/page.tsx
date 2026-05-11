@@ -161,13 +161,13 @@ export default function TerminalPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
       <PageHeader
         title="Command Terminal"
         description="Advanced tool: run bot commands with Discord context. Prefix is added automatically if you omit !"
       />
 
-      <div className="rounded-lg border border-border bg-card p-5 space-y-4 mb-5">
+      <div className="rounded-2xl border border-border bg-card p-5 space-y-4 mb-5 shadow-sm">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Context
         </h2>
@@ -274,7 +274,7 @@ export default function TerminalPage() {
         ))}
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-4 mb-5">
+      <div className="rounded-2xl border border-border bg-card p-4 mb-5 shadow-sm">
         <div className="flex items-center gap-2">
           <Terminal className="h-4 w-4 text-muted-foreground shrink-0" />
           <Input
@@ -315,7 +315,7 @@ export default function TerminalPage() {
             <div
               key={item.id}
               className={cn(
-                "rounded-lg border bg-card overflow-hidden",
+                "rounded-2xl border bg-card overflow-hidden shadow-sm transition-shadow hover:shadow-md",
                 item.ok ? "border-border" : "border-destructive/30"
               )}
             >

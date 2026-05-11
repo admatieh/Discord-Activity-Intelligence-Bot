@@ -162,7 +162,7 @@ export default function MessagesPage() {
   const charOver = content.length > MAX_CHARS
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-500">
       <PageHeader
         title="Messages"
         description="Send or schedule announcements to Discord channels."
@@ -171,8 +171,8 @@ export default function MessagesPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Composer */}
         <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-foreground">Compose message</h2>
+          <div className="rounded-2xl border border-border bg-card p-5 md:p-6 space-y-5 shadow-sm">
+            <h2 className="text-base font-semibold text-foreground border-b border-border pb-2">Compose message</h2>
 
             {/* Server */}
             <div className="space-y-1.5">
@@ -281,9 +281,9 @@ export default function MessagesPage() {
 
           {/* Preview */}
           {content.trim() && (
-            <div className="rounded-lg border border-border bg-card p-4">
-              <p className="text-xs font-medium text-muted-foreground mb-2">Preview</p>
-              <div className="rounded-md bg-muted px-3 py-2">
+            <div className="rounded-2xl border border-border bg-card p-5 md:p-6 shadow-sm">
+              <p className="text-sm font-semibold text-foreground border-b border-border pb-2 mb-4">Preview</p>
+              <div className="rounded-xl bg-accent/40 border border-border px-4 py-3">
                 <p className="text-xs text-muted-foreground mb-0.5">
                   #{selectedChannelObj?.name ?? "channel"}
                 </p>
@@ -345,9 +345,9 @@ export default function MessagesPage() {
                 className="py-8"
               />
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {scheduledMessages.slice(0, 5).map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
+                  <div key={item.id} className="flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm transition-shadow hover:shadow-md">
                     <Calendar className="h-4 w-4 text-primary shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-foreground truncate">{item.title || "Scheduled message"}</p>
@@ -371,9 +371,9 @@ export default function MessagesPage() {
                 className="py-8"
               />
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {deliveries.slice(0, 8).map((d) => (
-                  <div key={d.id} className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
+                  <div key={d.id} className="flex items-start gap-3 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm transition-shadow hover:shadow-md">
                     <div className={cn(
                       "mt-0.5 h-2 w-2 rounded-full shrink-0",
                       d.status === "sent" ? "bg-success" :
