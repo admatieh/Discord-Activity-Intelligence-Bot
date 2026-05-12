@@ -2,6 +2,7 @@ const db = require('../database/db')
 const logger = require('../utils/logger')
 const activityEventModel = require('../modules/activity/activityEventModel')
 const attendanceSettingsService = require('./attendanceSettingsService')
+const rosterService = require('./rosterService')
 
 function parseHHmm(str) {
   const m = /^(\d{2}):(\d{2})$/.exec(String(str || '').trim())
@@ -352,9 +353,27 @@ function getMissingCheckpoints({ guildId, date, users }) {
   const defs = attendanceSettingsService.getCheckpointDefinitions(guildId).definitions || []
   const checkpoints = defs.filter((d) => d.active && d.required).map((c) => c.key)
 
-  // Determine roster: provided users list (preferred) or inferred from records for that date.
+  // Determine roster: provided users list (preferred), active roster table, then inferred records fallback.
   let roster = Array.isArray(users) ? users.filter((u) => u && u.userId) : null
-  if (!roster) {
+  let usedRosterFallback = false
+  if (!roster || roster.length === 0) {
+    const activeCohort = rosterService.getActiveCohort(guildId)
+    const rosterRows = rosterService.listStudents({
+      guildId,
+      cohortId: activeCohort?.id || null,
+      active: true,
+    })
+    roster = (rosterRows || []).map((s) => ({
+      userId: s.discord_user_id || `student:${s.id}`,
+      name: s.preferred_name || s.full_name || s.discord_username || `Student ${s.id}`,
+      dutyStation: s.duty_station || 'Remote',
+      sourceStudentId: s.id,
+      hasDiscordUserId: Boolean(s.discord_user_id),
+    }))
+  }
+
+  if (!roster || roster.length === 0) {
+    usedRosterFallback = true
     const people = db
       .prepare(
         `SELECT DISTINCT user_id as userId, COALESCE(display_name, username, user_id) as name, duty_station as dutyStation
@@ -388,7 +407,6 @@ function getMissingCheckpoints({ guildId, date, users }) {
           userId: u.userId,
           name: u.name || u.displayName || u.username || u.userId,
           dutyStation: u.dutyStation || 'Remote',
-          dutyStation: u.dutyStation || 'Remote',
           attendanceDate: date,
           checkpointKey: key,
         })
@@ -396,7 +414,15 @@ function getMissingCheckpoints({ guildId, date, users }) {
     }
   }
 
-  return { ok: true, date, missing }
+  return {
+    ok: true,
+    date,
+    missing,
+    rosterConfigured: !usedRosterFallback,
+    warning: usedRosterFallback
+      ? 'No roster configured. Missing students may be incomplete.'
+      : null,
+  }
 }
 
 function upsertManualAttendance({
@@ -485,7 +511,7 @@ function upsertManualAttendance({
   return { ok: true, record: row, previous: existing || null }
 }
 
-function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', mode = 'range' }) {
+function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', cohortId = null, mode = 'range' }) {
   if (!guildId || !startDate || !endDate) {
     return { ok: false, error: 'guildId, startDate, and endDate are required.' }
   }
@@ -503,7 +529,7 @@ function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', mod
 
   const header = [
     'Course Name',
-    'Month',
+    'Cohort',
     'Student Name',
     'Duty Station',
     'Date',
@@ -524,15 +550,67 @@ function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', mod
   }
 
   const lines = [header.join(',')]
-  for (const r of rows) {
+  const cohortName =
+    cohortId && Number.isFinite(Number(cohortId))
+      ? db.prepare(`SELECT name FROM cohorts WHERE id=?`).get(Number(cohortId))?.name || ''
+      : ''
+  const dayName = (isoDate) => {
+    const d = new Date(`${isoDate}T00:00:00`)
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { weekday: 'short' })
+  }
+
+  const existingKeys = new Set(
+    rows.map((r) => `${r.user_id}::${r.attendance_date}::${r.checkpoint_key}`)
+  )
+  const rosterStudents = rosterService.listStudents({ guildId, cohortId, active: true })
+  const requiredDefs = defs.filter((d) => d.active && d.required)
+  const dateList = []
+  for (
+    let d = new Date(`${startDate}T00:00:00`);
+    d <= new Date(`${endDate}T00:00:00`);
+    d.setDate(d.getDate() + 1)
+  ) {
+    const yyyy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    dateList.push(`${yyyy}-${mm}-${dd}`)
+  }
+
+  const expandedRows = [...rows]
+  for (const s of rosterStudents) {
+    if (!s.discord_user_id) continue
+    for (const dt of dateList) {
+      for (const cp of requiredDefs) {
+        const key = `${s.discord_user_id}::${dt}::${cp.key}`
+        if (existingKeys.has(key)) continue
+        expandedRows.push({
+          display_name: s.preferred_name || s.full_name,
+          username: s.discord_username,
+          user_id: s.discord_user_id,
+          duty_station: s.duty_station || 'Remote',
+          attendance_date: dt,
+          checkpoint_key: cp.key,
+          checkpoint_label: cp.label,
+          status: 'missing',
+          local_checked_at: '',
+          checked_at: '',
+          signature_text: '',
+          source: 'roster_expected',
+          notes: '',
+        })
+      }
+    }
+  }
+
+  for (const r of expandedRows) {
     lines.push(
       [
         courseName,
-        String(r.attendance_date || '').slice(0, 7),
+        cohortName,
         r.display_name || r.username || r.user_id,
         r.duty_station || 'Remote',
         r.attendance_date,
-        '',
+        dayName(r.attendance_date),
         r.checkpoint_label || r.checkpoint_key,
         keyToTarget.get(r.checkpoint_key) || '',
         r.status || '',
@@ -540,9 +618,7 @@ function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', mod
         r.signature_text || '',
         r.source || '',
         r.notes || '',
-      ]
-        .map(escape)
-        .join(',')
+      ].map(escape).join(',')
     )
   }
 
@@ -556,7 +632,7 @@ function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', mod
     })
   } catch (_) {}
 
-  return { ok: true, csv: lines.join('\n'), count: rows.length }
+  return { ok: true, csv: lines.join('\n'), count: expandedRows.length }
 }
 
 function getUserCheckpointRange({ guildId, userId, startDate, endDate }) {

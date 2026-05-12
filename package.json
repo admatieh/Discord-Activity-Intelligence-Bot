@@ -20,6 +20,7 @@
   "dependencies": {
     "better-sqlite3": "^12.9.0",
     "chrono-node": "^2.9.1",
+    "csv-parse": "^6.2.1",
     "discord.js": "^14.26.3",
     "dotenv": "^17.4.2",
     "nodemon": "^3.1.14"

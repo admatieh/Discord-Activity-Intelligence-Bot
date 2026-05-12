@@ -1,4 +1,4 @@
-const { sendResponse } = require('utils/responseHelper');
+const { sendResponse } = require('../utils/responseHelper');
 const { requireInstructor } = require('../utils/permissions');
 // commands/session-info.js
 //
@@ -19,6 +19,7 @@ module.exports = {
     name: 'session-info',
     category: 'session',
     requiredPermission: 'instructor',
+    supportsDashboard: true,
     aliases: ['info'],
     description: 'View details about sessions (all, active, or specific).',
     usage: '!session-info [--view all|open] [--id <sessionId>]',
@@ -73,7 +74,7 @@ module.exports = {
                 if (isNaN(sessionId)) {
                     return sendResponse(message, '❌ Session ID must be a number.', parsed?.options || {});
                 }
-                return replySessionDetail(message, sessionId);
+                return replySessionDetail(message, sessionId, options);
             }
 
             // Default: show active session for user's current voice channel
@@ -81,7 +82,7 @@ module.exports = {
             if (voiceChannel && sessionService.isSessionActive(voiceChannel.id)) {
                 const sid = sessionService.getSessionId(voiceChannel.id);
                 if (sid) {
-                    return replySessionDetail(message, sid);
+                    return replySessionDetail(message, sid, options);
                 }
             }
 
@@ -99,10 +100,10 @@ module.exports = {
 // Helper
 // ---------------------------------------------------------------------------
 
-function replySessionDetail(message, sessionId) {
+function replySessionDetail(message, sessionId, options = {}) {
     const info = sessionService.getSessionInfo(sessionId);
     if (!info) {
-        return sendResponse(message, '❌ Session not found.', parsed?.options || {});
+        return sendResponse(message, '❌ Session not found.', options);
     }
     const status = info.end_time ? '🔴 Ended' : '🟢 Active';
     const lines = [
@@ -115,5 +116,5 @@ function replySessionDetail(message, sessionId) {
         `👥 Attendees: ${info.attendeeCount}`,
         `🎙️ Voice events: ${info.eventCount}`
     ];
-    return message.reply(lines.join('\n'));
+    return sendResponse(message, lines.join('\n'), options);
 }

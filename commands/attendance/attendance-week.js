@@ -1,7 +1,7 @@
 const logger = require('../../utils/logger')
 const attendanceService = require('../../services/attendanceCheckpointService')
+const attendanceSettingsService = require('../../services/attendanceSettingsService')
 const { requireInstructor } = require('../../utils/permissions')
-const attendanceConfig = require('../../config/attendanceConfig')
 
 function isoDate(d) {
   const yyyy = d.getFullYear()
@@ -43,6 +43,8 @@ module.exports = {
 
       const res = attendanceService.getWeeklyAttendance({ guildId: message.guild.id, weekStart, weekEnd })
       if (!res.ok) return message.reply(`❌ ${res.error}`)
+      const defsRes = attendanceSettingsService.getCheckpointDefinitions(message.guild.id)
+      const checkpoints = (defsRes.definitions || []).filter((d) => d.active)
 
       const rows = res.rows || []
       if (rows.length === 0) {
@@ -50,7 +52,7 @@ module.exports = {
       }
 
       // Simple totals by checkpoint key
-      const counts = new Map(attendanceConfig.CHECKPOINTS.map((c) => [c.key, { present: 0, late: 0 }]))
+      const counts = new Map(checkpoints.map((c) => [c.key, { present: 0, late: 0 }]))
       for (const r of rows) {
         const c = counts.get(r.checkpoint_key) || { present: 0, late: 0 }
         if (r.status === 'present') c.present++
@@ -59,7 +61,7 @@ module.exports = {
       }
 
       const lines = [`📅 **Attendance Week** — ${weekStart} to ${weekEnd}`]
-      for (const cp of attendanceConfig.CHECKPOINTS) {
+      for (const cp of checkpoints) {
         const c = counts.get(cp.key) || { present: 0, late: 0 }
         lines.push(`- **${cp.label}**: ${c.present} present, ${c.late} late`)
       }

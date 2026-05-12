@@ -412,6 +412,104 @@ function initializeSchema() {
         CREATE INDEX IF NOT EXISTS idx_attendance_import_rows_import
             ON attendance_import_rows (import_id, status);
     `);
+
+    // ---- Roster / cohorts foundation ----
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS cohorts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            course_name TEXT,
+            course_code TEXT,
+            active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cohorts_guild_active
+            ON cohorts (guild_id, active);
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS students (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            preferred_name TEXT,
+            email TEXT,
+            discord_user_id TEXT,
+            discord_username TEXT,
+            duty_station TEXT DEFAULT 'Remote',
+            student_code TEXT,
+            active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_students_guild_active
+            ON students (guild_id, active);
+        CREATE INDEX IF NOT EXISTS idx_students_discord_user
+            ON students (guild_id, discord_user_id);
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS cohort_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cohort_id INTEGER NOT NULL,
+            student_id INTEGER NOT NULL,
+            joined_at TEXT DEFAULT (datetime('now')),
+            active INTEGER DEFAULT 1,
+            UNIQUE(cohort_id, student_id),
+            FOREIGN KEY (cohort_id) REFERENCES cohorts(id) ON DELETE CASCADE,
+            FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cohort_members_cohort_active
+            ON cohort_members (cohort_id, active);
+        CREATE INDEX IF NOT EXISTS idx_cohort_members_student
+            ON cohort_members (student_id);
+    `);
+
+    // ---- Period approvals and audit logging foundation ----
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_periods (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            cohort_id INTEGER,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            approved_by TEXT,
+            approved_at TEXT,
+            exported_at TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_periods_guild_dates
+            ON attendance_periods (guild_id, start_date, end_date);
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT,
+            actor_user_id TEXT,
+            actor_display_name TEXT,
+            action TEXT NOT NULL,
+            entity_type TEXT,
+            entity_id TEXT,
+            before_json TEXT,
+            after_json TEXT,
+            metadata_json TEXT,
+            source TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_guild_created
+            ON audit_logs (guild_id, created_at);
+    `);
 }
 
 try {

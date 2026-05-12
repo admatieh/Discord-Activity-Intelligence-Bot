@@ -2,6 +2,7 @@ const attendanceSummaryModel = require('../../models/attendanceSummaryModel');
 const logger = require('../../utils/logger');
 const { COMMAND_LIMITS } = require('../../config/constants');
 const attendanceService = require('../../services/attendanceCheckpointService');
+const attendanceSettingsService = require('../../services/attendanceSettingsService');
 
 const STATUS_EMOJI = {
     ON_TIME:    '✅',
@@ -84,22 +85,23 @@ module.exports = {
             if (truncated) output += `\n_Showing recent ${limit} sessions._`;
 
             if (cpRows.length > 0) {
+                const defsRes = attendanceSettingsService.getCheckpointDefinitions(message.guild.id);
+                const activeDefs = (defsRes.definitions || [])
+                    .filter((d) => d.active)
+                    .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
                 const byDate = new Map();
                 for (const r of cpRows) {
-                    const v = byDate.get(r.attendance_date) || { morning: null, midday: null, checkout: null };
-                    if (r.checkpoint_key === 'morning_checkin') v.morning = r.status;
-                    if (r.checkpoint_key === 'midday_checkin') v.midday = r.status;
-                    if (r.checkpoint_key === 'checkout') v.checkout = r.status;
+                    const v = byDate.get(r.attendance_date) || {};
+                    v[r.checkpoint_key] = r.status;
                     byDate.set(r.attendance_date, v);
                 }
                 const dateLines = [];
                 for (const [d, v] of Array.from(byDate.entries()).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7)) {
-                    dateLines.push(
-                        `${d}: ${v.morning || '—'} / ${v.midday || '—'} / ${v.checkout || '—'}`
-                    );
+                    const orderedStatuses = activeDefs.map((cp) => v[cp.key] || '—');
+                    dateLines.push(`${d}: ${orderedStatuses.join(' / ')}`);
                 }
                 output += `\n\n🧾 **Checkpoints (last 7 days)**\n`;
-                output += `\`morning / midday / checkout\`\n`;
+                output += `\`${activeDefs.map((cp) => cp.label).join(' / ')}\`\n`;
                 output += `\`\`\`\n${dateLines.join('\n')}\n\`\`\``;
                 output += `\n_Use \`!checkin\` during open windows and \`!checkout\` at the end of day._`;
             } else {

@@ -1,11 +1,11 @@
 const logger = require('../../utils/logger')
 const attendanceService = require('../../services/attendanceCheckpointService')
+const attendanceSettingsService = require('../../services/attendanceSettingsService')
 const { requireInstructor } = require('../../utils/permissions')
-const attendanceConfig = require('../../config/attendanceConfig')
 
-function summarize(rows) {
+function summarize(rows, checkpoints) {
   const byKey = new Map()
-  for (const cp of attendanceConfig.CHECKPOINTS) {
+  for (const cp of checkpoints) {
     byKey.set(cp.key, { present: 0, late: 0, other: 0 })
   }
   for (const r of rows) {
@@ -36,10 +36,12 @@ module.exports = {
       const date = parsed?.options?.date
       const res = attendanceService.getTodayAttendance({ guildId: message.guild.id, date })
       if (!res.ok) return message.reply(`❌ ${res.error}`)
+      const defsRes = attendanceSettingsService.getCheckpointDefinitions(message.guild.id)
+      const checkpoints = (defsRes.definitions || []).filter((d) => d.active)
 
-      const sums = summarize(res.rows || [])
+      const sums = summarize(res.rows || [], checkpoints)
       const lines = [`📋 **Attendance Today** — ${res.attendanceDate}`]
-      for (const cp of attendanceConfig.CHECKPOINTS) {
+      for (const cp of checkpoints) {
         const s = sums.get(cp.key) || { present: 0, late: 0, other: 0 }
         lines.push(`- **${cp.label}**: ${s.present} present, ${s.late} late${s.other ? `, ${s.other} other` : ''}`)
       }

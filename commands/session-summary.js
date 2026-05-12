@@ -1,4 +1,4 @@
-const { sendResponse } = require('utils/responseHelper');
+const { sendResponse } = require('../utils/responseHelper');
 const { requireInstructor } = require('../utils/permissions');
 // commands/session-summary.js
 
@@ -10,6 +10,7 @@ module.exports = {
     name: 'session-summary',
     category: 'session',
     requiredPermission: 'instructor',
+    supportsDashboard: true,
     aliases: ['summary'],
     description: 'Displays the attendance summary of a specific session.',
     usage: '!session-summary [--latest] [--id <number>] [--channel <mention>]',

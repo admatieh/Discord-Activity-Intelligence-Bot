@@ -7,6 +7,7 @@ export async function GET(request: Request) {
   const startDate = searchParams.get("startDate")
   const endDate = searchParams.get("endDate")
   const courseName = searchParams.get("courseName")
+  const cohortId = searchParams.get("cohortId")
   if (!guildId || !startDate || !endDate) {
     return NextResponse.json(
       { ok: false, error: "guildId, startDate, and endDate are required", data: null },
@@ -15,6 +16,7 @@ export async function GET(request: Request) {
   }
   const sp = new URLSearchParams({ guildId, startDate, endDate })
   if (courseName) sp.set("courseName", courseName)
+  if (cohortId) sp.set("cohortId", cohortId)
   const result = await botGet(`/attendance/export?${sp.toString()}`, { timeoutMs: 30_000 })
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error ?? "Bot API is offline", data: null }, { status: 503 })

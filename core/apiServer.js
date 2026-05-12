@@ -303,12 +303,112 @@ function startApiServer(client) {
                 const startDate = query.startDate;
                 const endDate = query.endDate;
                 const courseName = query.courseName || '';
+                const cohortId = query.cohortId ? Number(query.cohortId) : null;
                 if (!guildId || !startDate || !endDate) {
                     return sendJson(res, 400, { ok: false, error: 'guildId, startDate, and endDate are required' });
                 }
-                const result = attendanceService.exportAttendanceCsv({ guildId, startDate, endDate, courseName, mode: 'range' });
+                const result = attendanceService.exportAttendanceCsv({ guildId, startDate, endDate, courseName, cohortId, mode: 'range' });
                 if (!result.ok) return sendJson(res, 400, result);
                 return sendJson(res, 200, result);
+            }
+
+            // ----------------------------------------------------------------
+            // Roster / cohorts
+            // ----------------------------------------------------------------
+            if (pathname === '/api/roster/cohorts' && method === 'GET') {
+                const rosterService = require('../services/rosterService');
+                const guildId = query.guildId;
+                if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
+                return sendJson(res, 200, { ok: true, cohorts: rosterService.listCohorts(guildId) });
+            }
+
+            if (pathname === '/api/roster/cohorts' && method === 'POST') {
+                const rosterService = require('../services/rosterService');
+                const body = await readBody(req);
+                const result = rosterService.createCohort({
+                    guildId: body.guildId,
+                    name: body.name,
+                    courseName: body.courseName || null,
+                    courseCode: body.courseCode || null,
+                    active: body.active === false ? 0 : 1,
+                });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/roster/students' && method === 'GET') {
+                const rosterService = require('../services/rosterService');
+                const guildId = query.guildId;
+                const cohortId = query.cohortId ? Number(query.cohortId) : null;
+                const active = query.active == null ? undefined : String(query.active) === 'true';
+                if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
+                const students = rosterService.listStudents({ guildId, cohortId, active });
+                return sendJson(res, 200, { ok: true, students });
+            }
+
+            if (pathname === '/api/roster/students' && method === 'POST') {
+                const rosterService = require('../services/rosterService');
+                const body = await readBody(req);
+                const result = rosterService.upsertStudent({
+                    guildId: body.guildId,
+                    fullName: body.fullName,
+                    preferredName: body.preferredName || null,
+                    email: body.email || null,
+                    discordUserId: body.discordUserId || null,
+                    discordUsername: body.discordUsername || null,
+                    dutyStation: body.dutyStation || 'Remote',
+                    studentCode: body.studentCode || null,
+                    active: body.active === false ? 0 : 1,
+                });
+                if (result.ok && body.cohortId) {
+                    rosterService.attachStudentToCohort({
+                        cohortId: Number(body.cohortId),
+                        studentId: result.student.id,
+                        active: 1,
+                    });
+                }
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            let rosterParams = matchPath(pathname, '/api/roster/students/:id');
+            if (rosterParams && (method === 'PATCH' || method === 'POST')) {
+                const rosterService = require('../services/rosterService');
+                const body = await readBody(req);
+                const guildId = body.guildId || query.guildId;
+                if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
+                const result = rosterService.updateStudent({
+                    guildId,
+                    studentId: Number(rosterParams.id),
+                    data: body,
+                });
+                if (result.ok && body.cohortId) {
+                    rosterService.attachStudentToCohort({
+                        cohortId: Number(body.cohortId),
+                        studentId: Number(rosterParams.id),
+                        active: body.active === false ? 0 : 1,
+                    });
+                }
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/roster/import' && method === 'POST') {
+                const rosterService = require('../services/rosterService');
+                const body = await readBody(req);
+                const result = rosterService.importRosterCsv({
+                    guildId: body.guildId,
+                    csvText: body.csvText,
+                    defaultCohortId: body.cohortId ? Number(body.cohortId) : null,
+                    columnMap: body.columnMap || {},
+                    dryRun: body.dryRun === true,
+                });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/roster/export' && method === 'GET') {
+                const rosterService = require('../services/rosterService');
+                const guildId = query.guildId;
+                const cohortId = query.cohortId ? Number(query.cohortId) : null;
+                const result = rosterService.exportRosterCsv({ guildId, cohortId });
+                return sendJson(res, result.ok ? 200 : 400, result);
             }
 
             if (pathname === '/api/attendance/import/preview' && method === 'POST') {

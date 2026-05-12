@@ -141,6 +141,7 @@ async function runTests() {
 
     // --- PHASE 1: Imports ---
     let db, logModel, schedulerService, messageService, sessionActionService, reportService, activityFeedService, apiServer, commandExecutor;
+    let attendanceService, attendanceSettingsService, rosterService;
 
     await test('Import database/db.js', async () => {
         db = require('../database/db');
@@ -191,6 +192,15 @@ async function runTests() {
         assert(typeof commandExecutor.executeCommand === 'function', 'Missing executeCommand');
     });
 
+    await test('Import attendance/roster services', async () => {
+        attendanceService = require('../services/attendanceCheckpointService');
+        attendanceSettingsService = require('../services/attendanceSettingsService');
+        rosterService = require('../services/rosterService');
+        assert(typeof attendanceService.recordCheckpoint === 'function', 'Missing recordCheckpoint');
+        assert(typeof attendanceSettingsService.getCheckpointDefinitions === 'function', 'Missing getCheckpointDefinitions');
+        assert(typeof rosterService.createCohort === 'function', 'Missing createCohort');
+    });
+
     // --- PHASE 2: Database Schema ---
     await test('Database tables exist', async () => {
         const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name);
@@ -224,8 +234,210 @@ async function runTests() {
         }
     });
 
+    await test('Attendance and roster tables exist', async () => {
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name);
+        const required = [
+            'attendance_checkpoints',
+            'attendance_checkpoint_definitions',
+            'attendance_imports',
+            'attendance_import_rows',
+            'cohorts',
+            'students',
+            'cohort_members',
+            'audit_logs'
+        ];
+        for (const req of required) {
+            assert(tables.includes(req), `Missing table: ${req}`);
+        }
+    });
+
     // --- PHASE 3: Log Model Tests ---
     if (!USE_REAL_DB) {
+        await test('Attendance defaults + dynamic checkpoint logic works', async () => {
+            const guildId = 'guild_attendance_defs';
+            const defs = attendanceSettingsService.getCheckpointDefinitions(guildId);
+            assert(defs.ok, 'checkpoint definitions failed to load');
+            assert((defs.definitions || []).length >= 3, 'default checkpoint definitions not created');
+
+            const morning = defs.definitions.find(d => d.key === 'morning_checkin');
+            assert(morning, 'missing default morning_checkin definition');
+
+            const updated = attendanceSettingsService.updateCheckpointDefinition(guildId, morning.id, {
+                ...morning,
+                targetTime: '09:30',
+                opensBeforeMinutes: 30,
+                lateAfterMinutes: 10,
+                allowLateSubmission: true
+            });
+            assert(updated.ok, 'failed to update checkpoint definition');
+
+            const rec = attendanceService.recordCheckpoint({
+                guildId,
+                userId: 'student_dynamic_1',
+                username: 'student_dynamic_1',
+                displayName: 'Student Dynamic',
+                commandType: 'checkin',
+                now: new Date('2026-01-02T07:20:00.000Z')
+            });
+            assert(rec.ok, `recordCheckpoint should succeed in open window: ${rec.error || 'unknown'}`);
+        });
+
+        await test('Attendance duplicate checkin + checkout + late accepted', async () => {
+            const guildId = 'guild_attendance_dupes';
+            const first = attendanceService.recordCheckpoint({
+                guildId,
+                userId: 'student_1',
+                username: 'student_1',
+                displayName: 'Student 1',
+                commandType: 'checkin',
+                now: new Date('2026-01-02T06:50:00.000Z')
+            });
+            assert(first.ok, `initial checkin failed: ${first.error || 'unknown'}`);
+
+            const duplicate = attendanceService.recordCheckpoint({
+                guildId,
+                userId: 'student_1',
+                username: 'student_1',
+                displayName: 'Student 1',
+                commandType: 'checkin',
+                now: new Date('2026-01-02T06:55:00.000Z')
+            });
+            assert(duplicate.ok, 'duplicate checkin should not fail');
+            assert(duplicate.alreadyCompleted === true, 'duplicate checkin should flag alreadyCompleted');
+
+            const late = attendanceService.recordCheckpoint({
+                guildId,
+                userId: 'student_2',
+                username: 'student_2',
+                displayName: 'Student 2',
+                commandType: 'checkin',
+                now: new Date('2026-01-02T07:30:00.000Z')
+            });
+            assert(late.ok, 'late checkin should still be accepted');
+            assert(late.status === 'late', 'late checkin should be marked late');
+
+            const checkout = attendanceService.recordCheckpoint({
+                guildId,
+                userId: 'student_1',
+                username: 'student_1',
+                displayName: 'Student 1',
+                commandType: 'checkout',
+                now: new Date('2026-01-02T14:10:00.000Z')
+            });
+            assert(checkout.ok, 'checkout should be recorded');
+        });
+
+        await test('Missing attendance uses roster and flags fallback', async () => {
+            const guildId = 'guild_roster_missing';
+            const cohortRes = rosterService.createCohort({ guildId, name: 'Cohort A' });
+            assert(cohortRes.ok, 'createCohort failed');
+            const s1 = rosterService.upsertStudent({ guildId, fullName: 'Alice Example', discordUserId: 'alice_1' });
+            const s2 = rosterService.upsertStudent({ guildId, fullName: 'Bob Example', discordUserId: 'bob_1' });
+            assert(s1.ok && s2.ok, 'upsertStudent failed');
+            assert(rosterService.attachStudentToCohort({ cohortId: cohortRes.cohort.id, studentId: s1.student.id }).ok, 'attach s1 failed');
+            assert(rosterService.attachStudentToCohort({ cohortId: cohortRes.cohort.id, studentId: s2.student.id }).ok, 'attach s2 failed');
+
+            attendanceService.recordCheckpoint({
+                guildId,
+                userId: 'alice_1',
+                username: 'alice_1',
+                displayName: 'Alice Example',
+                commandType: 'checkin',
+                now: new Date('2026-01-02T06:50:00.000Z')
+            });
+
+            const missingWithRoster = attendanceService.getMissingCheckpoints({ guildId, date: '2026-01-02' });
+            assert(missingWithRoster.ok, 'getMissingCheckpoints failed with roster');
+            assert(missingWithRoster.rosterConfigured === true, 'roster should be treated as configured');
+            assert((missingWithRoster.missing || []).some(m => m.userId === 'bob_1'), 'Bob should be missing via roster');
+
+            const noRoster = attendanceService.getMissingCheckpoints({ guildId: 'guild_no_roster', date: '2026-01-02' });
+            assert(noRoster.ok, 'getMissingCheckpoints failed without roster');
+            assert(noRoster.rosterConfigured === false, 'missing response should flag fallback mode');
+            assert(noRoster.warning, 'fallback mode should include warning');
+        });
+
+        await test('Roster CSV import supports quotes and updates duplicates', async () => {
+            const guildId = 'guild_roster_import';
+            const csv1 = `Full Name,Preferred Name,Email,Discord User ID,Discord Username,Duty Station,Student Code,Cohort
+"Doe, John",John,john@example.com,discord_john,johnny,Remote,S001,Cohort CSV
+Jane Smith,Jane,jane@example.com,discord_jane,janey,Remote,S002,Cohort CSV`;
+            const first = rosterService.importRosterCsv({ guildId, csvText: csv1, dryRun: false });
+            assert(first.ok, `importRosterCsv failed: ${first.error || 'unknown'}`);
+            assert(first.rowsImported >= 2, 'expected two imported rows');
+
+            const csv2 = `Full Name,Preferred Name,Email,Discord User ID,Discord Username,Duty Station,Student Code,Cohort
+"Doe, John",Johnny,john@example.com,discord_john,johnny2,Hybrid,S001,Cohort CSV`;
+            const second = rosterService.importRosterCsv({ guildId, csvText: csv2, dryRun: false });
+            assert(second.ok, 'second import failed');
+            assert(second.rowsUpdated >= 1, 'duplicate import should update, not insert duplicate');
+
+            const students = rosterService.listStudents({ guildId });
+            assert(students.length === 2, 'duplicate row created extra student unexpectedly');
+            const john = students.find(s => s.email === 'john@example.com');
+            assert(john && john.discord_username === 'johnny2', 'duplicate update did not apply latest values');
+
+            const cohorts = rosterService.listCohorts(guildId);
+            assert(cohorts.some(c => c.name === 'Cohort CSV'), 'cohort from CSV was not created');
+        });
+
+        await test('Roster CSV import fails gracefully for missing full name', async () => {
+            const guildId = 'guild_roster_import_missing';
+            const csv = `Email,Discord User ID
+bad@example.com,abc123`;
+            const res = rosterService.importRosterCsv({ guildId, csvText: csv, dryRun: false });
+            assert(res.ok === false, 'import should fail when Full Name column is missing');
+        });
+
+        await test('Attendance CSV export includes expected headers', async () => {
+            const exp = attendanceService.exportAttendanceCsv({
+                guildId: 'guild_attendance_dupes',
+                startDate: '2026-01-01',
+                endDate: '2026-01-31',
+                courseName: 'QA Course'
+            });
+            assert(exp.ok, 'exportAttendanceCsv failed');
+            assert(exp.csv.includes('Course Name,Cohort,Student Name'), 'CSV headers missing expected prefix');
+        });
+
+        await test('Attendance export includes missing roster rows', async () => {
+            const guildId = 'guild_export_missing';
+            const cohortRes = rosterService.createCohort({ guildId, name: 'Export Cohort' });
+            const st = rosterService.upsertStudent({ guildId, fullName: 'Missing Export Student', discordUserId: 'missing_export_1' });
+            assert(cohortRes.ok && st.ok, 'Failed to seed roster for export');
+            rosterService.attachStudentToCohort({ cohortId: cohortRes.cohort.id, studentId: st.student.id, active: 1 });
+
+            const exp = attendanceService.exportAttendanceCsv({
+                guildId,
+                startDate: '2026-01-05',
+                endDate: '2026-01-05',
+                courseName: 'QA Course',
+                cohortId: cohortRes.cohort.id
+            });
+            assert(exp.ok, 'exportAttendanceCsv failed for roster missing check');
+            assert(exp.csv.includes('missing_export_1') || exp.csv.includes('Missing Export Student'),
+                'export should include roster student even with no attendance rows');
+            assert(exp.csv.includes(',missing,'), 'export should include missing status rows');
+        });
+
+        await test('Manual attendance correction upsert works', async () => {
+            const guildId = 'guild_attendance_dupes';
+            const res = attendanceService.upsertManualAttendance({
+                guildId,
+                userId: 'student_1',
+                date: '2026-01-02',
+                checkpointKey: 'midday_checkin',
+                status: 'excused',
+                changedBy: 'instructor_test',
+                reason: 'Approved absence'
+            });
+            assert(res.ok, `manual correction failed: ${res.error || 'unknown'}`);
+            const row = db.prepare(
+                `SELECT * FROM attendance_checkpoints WHERE guild_id=? AND user_id=? AND attendance_date=? AND checkpoint_key=?`
+            ).get(guildId, 'student_1', '2026-01-02', 'midday_checkin');
+            assert(row && row.status === 'excused', 'manual correction did not upsert checkpoint');
+        });
+
         await test('Insert and retrieve enhanced log', async () => {
             const success = logModel.insertLog('info', 'Test log from bot system test', null, {
                 source: 'test-runner',

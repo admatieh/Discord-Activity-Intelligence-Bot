@@ -6,12 +6,13 @@ const logger = require('../utils/logger');
 module.exports = {
     name: 'whoareyou',
     category: 'general',
-    requiredPermission: 'public',
+    requiredPermission: 'instructor',
     description: 'Learn what this bot does.',
     usage: '!whoareyou',
     options: [],
     async execute(message) {
-
+        const permission = await requireInstructor(message);
+        if (!permission.allowed) return message.reply(permission.message);
         try {
             return message.reply(
                 "I am a Discord-based bot created by Adam Abo Atieh that automatically monitors live sessions, " +

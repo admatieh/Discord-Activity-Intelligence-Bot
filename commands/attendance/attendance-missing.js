@@ -24,7 +24,8 @@ module.exports = {
 
       const missing = res.missing || []
       if (missing.length === 0) {
-        return message.reply(`✅ No missing checkpoints detected for ${date} (based on known roster).`)
+        const suffix = res.warning ? `\nℹ️ ${res.warning}` : ''
+        return message.reply(`✅ No missing checkpoints detected for ${date}.${suffix}`)
       }
 
       const lines = [`⚠️ **Missing checkpoints** — ${date}`]
@@ -33,7 +34,10 @@ module.exports = {
       }
       if (missing.length > 25) lines.push(`_...and ${missing.length - 25} more._`)
       lines.push('')
-      lines.push('Note: v1 roster is inferred from existing attendance records; use dashboard for corrections.')
+      if (res.warning) {
+        lines.push('')
+        lines.push(`ℹ️ ${res.warning}`)
+      }
       return message.reply(lines.join('\n'))
     } catch (error) {
       logger.error(`attendance-missing error: ${error.message}`, { error: error.message })
