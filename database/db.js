@@ -282,6 +282,136 @@ function initializeSchema() {
         CREATE INDEX IF NOT EXISTS idx_session_reports_session
             ON session_reports (session_id);
     `);
+
+    // ---- New: attendance checkpoints (daily check-in / checkout) ----
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_checkpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            username TEXT,
+            display_name TEXT,
+            duty_station TEXT DEFAULT 'Remote',
+            attendance_date TEXT NOT NULL,
+            checkpoint_key TEXT NOT NULL,
+            checkpoint_label TEXT,
+            status TEXT NOT NULL,
+            checked_at TEXT,
+            local_checked_at TEXT,
+            source TEXT,
+            discord_message_id TEXT,
+            channel_id TEXT,
+            session_id INTEGER,
+            signature_text TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT,
+            UNIQUE (guild_id, user_id, attendance_date, checkpoint_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_checkpoints_guild_date
+            ON attendance_checkpoints (guild_id, attendance_date);
+        CREATE INDEX IF NOT EXISTS idx_attendance_checkpoints_user_date
+            ON attendance_checkpoints (user_id, attendance_date);
+        CREATE INDEX IF NOT EXISTS idx_attendance_checkpoints_checkpoint
+            ON attendance_checkpoints (checkpoint_key, attendance_date);
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_manual_overrides (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            checkpoint_id INTEGER,
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            attendance_date TEXT NOT NULL,
+            checkpoint_key TEXT NOT NULL,
+            old_status TEXT,
+            new_status TEXT,
+            reason TEXT,
+            changed_by TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_overrides_guild_date
+            ON attendance_manual_overrides (guild_id, attendance_date);
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL UNIQUE,
+            timezone TEXT,
+            active_days_json TEXT,
+            checkpoints_json TEXT,
+            reminder_channel_id TEXT,
+            enabled INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT
+        );
+    `);
+
+    // v2 instructor-controlled checkpoint definitions
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_checkpoint_definitions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            label TEXT NOT NULL,
+            command_type TEXT NOT NULL,
+            target_time TEXT NOT NULL,
+            opens_before_minutes INTEGER DEFAULT 15,
+            late_after_minutes INTEGER DEFAULT 15,
+            closes_after_minutes INTEGER,
+            allow_late_submission INTEGER DEFAULT 1,
+            allow_after_close_manual_only INTEGER DEFAULT 0,
+            required INTEGER DEFAULT 1,
+            active INTEGER DEFAULT 1,
+            sort_order INTEGER DEFAULT 0,
+            timezone TEXT DEFAULT 'Asia/Beirut',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT,
+            UNIQUE (guild_id, key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_checkpoint_defs_guild_active
+            ON attendance_checkpoint_definitions (guild_id, active, sort_order);
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_imports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            filename TEXT,
+            file_type TEXT,
+            imported_by TEXT,
+            status TEXT,
+            rows_total INTEGER,
+            rows_imported INTEGER,
+            rows_failed INTEGER,
+            error TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_imports_guild
+            ON attendance_imports (guild_id, created_at);
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_import_rows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            import_id INTEGER NOT NULL,
+            row_number INTEGER,
+            raw_json TEXT,
+            normalized_json TEXT,
+            status TEXT,
+            error TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (import_id) REFERENCES attendance_imports(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_import_rows_import
+            ON attendance_import_rows (import_id, status);
+    `);
 }
 
 try {

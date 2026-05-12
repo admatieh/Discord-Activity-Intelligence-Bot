@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 const { parseArgs } = require('../utils/argParser');
 const db = require('../database/db');
 const { ChannelType } = require('discord.js');
+const { toRoleCollection } = require('../utils/mockDiscord');
 
 // Removed global mutex — it caused false "another command executing" errors
 // Each command handles its own concurrency if needed
@@ -42,14 +43,24 @@ class MockMessage {
             }
         }
 
+        const isTrustedDashboard = (context.source || 'dashboard') === 'dashboard';
+
         this.member = {
             id: context.user?.id || 'dashboard_user',
+            user: {
+                id: context.user?.id || 'dashboard_user',
+                username: context.user?.username || 'Dashboard',
+                tag: context.user?.username || 'Dashboard'
+            },
+            displayName: context.user?.displayName || context.user?.username || 'Dashboard',
             voice: { channel: voiceChannel },
             permissions: {
-                has: () => true // Assume dashboard user has instructor perms
+                has: () => isTrustedDashboard // Only trusted for internal API execution
             },
             roles: {
-                cache: { some: () => true }
+                // Discord.js expects member.roles.cache to be a Collection-like structure.
+                // For dashboard/API execution we mimic enough of the API for permission helpers.
+                cache: toRoleCollection(context.user?.roles)
             }
         };
         this.guild = {

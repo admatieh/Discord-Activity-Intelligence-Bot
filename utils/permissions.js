@@ -13,15 +13,37 @@ const BOT_ADMIN_USER_IDS = (process.env.BOT_ADMIN_USER_IDS || '')
     .filter(Boolean);
 
 function hasAnyRoleId(member, roleIds) {
-    if (!member?.roles?.cache || !roleIds.length) return false;
-
-    return roleIds.some((roleId) => member.roles.cache.has(roleId));
+    if (!roleIds.length) return false;
+    const cache = member?.roles?.cache;
+    return roleIds.some((roleId) => roleCacheHas(cache, roleId));
 }
 
 function hasRoleName(member, roleName) {
-    if (!member?.roles?.cache || !roleName) return false;
+    if (!roleName) return false;
+    const cache = member?.roles?.cache;
+    return roleCacheSome(cache, (role) => role?.name === roleName);
+}
 
-    return member.roles.cache.some((role) => role.name === roleName);
+function roleCacheHas(cache, roleId) {
+    if (!cache || !roleId) return false;
+    try {
+        if (typeof cache.has === 'function') return cache.has(roleId);
+        if (typeof cache.get === 'function') return Boolean(cache.get(roleId));
+        if (Array.isArray(cache)) return cache.some((role) => role?.id === roleId);
+        if (typeof cache === 'object') return Boolean(cache[roleId]);
+    } catch (_) {}
+    return false;
+}
+
+function roleCacheSome(cache, predicate) {
+    if (!cache) return false;
+    try {
+        if (typeof cache.some === 'function') return cache.some(predicate);
+        if (typeof cache.values === 'function') return Array.from(cache.values()).some(predicate);
+        if (Array.isArray(cache)) return cache.some(predicate);
+        if (typeof cache === 'object') return Object.values(cache).some(predicate);
+    } catch (_) {}
+    return false;
 }
 
 /**

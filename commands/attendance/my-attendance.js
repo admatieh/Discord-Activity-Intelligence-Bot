@@ -1,6 +1,7 @@
 const attendanceSummaryModel = require('../../models/attendanceSummaryModel');
 const logger = require('../../utils/logger');
 const { COMMAND_LIMITS } = require('../../config/constants');
+const attendanceService = require('../../services/attendanceCheckpointService');
 
 const STATUS_EMOJI = {
     ON_TIME:    '✅',
@@ -27,7 +28,27 @@ module.exports = {
 
             const records = attendanceSummaryModel.getByUser(userId);
 
-            if (!records || records.length === 0) {
+            // Checkpoint attendance (today + recent 7 days)
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            const endDate = `${yyyy}-${mm}-${dd}`;
+            const start = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
+            const sy = start.getFullYear();
+            const sm = String(start.getMonth() + 1).padStart(2, '0');
+            const sd = String(start.getDate()).padStart(2, '0');
+            const startDate = `${sy}-${sm}-${sd}`;
+
+            const cpRes = attendanceService.getUserCheckpointRange({
+                guildId: message.guild.id,
+                userId,
+                startDate,
+                endDate
+            });
+            const cpRows = cpRes.ok ? (cpRes.rows || []) : [];
+
+            if ((!records || records.length === 0) && cpRows.length === 0) {
                 return message.reply(`ℹ️ I don't have any attendance records for you yet.`);
             }
 
@@ -61,6 +82,29 @@ module.exports = {
             output += `\`\`\`\n${header}\n${divider}\n${lines.join('\n')}\n\`\`\``;
             
             if (truncated) output += `\n_Showing recent ${limit} sessions._`;
+
+            if (cpRows.length > 0) {
+                const byDate = new Map();
+                for (const r of cpRows) {
+                    const v = byDate.get(r.attendance_date) || { morning: null, midday: null, checkout: null };
+                    if (r.checkpoint_key === 'morning_checkin') v.morning = r.status;
+                    if (r.checkpoint_key === 'midday_checkin') v.midday = r.status;
+                    if (r.checkpoint_key === 'checkout') v.checkout = r.status;
+                    byDate.set(r.attendance_date, v);
+                }
+                const dateLines = [];
+                for (const [d, v] of Array.from(byDate.entries()).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7)) {
+                    dateLines.push(
+                        `${d}: ${v.morning || '—'} / ${v.midday || '—'} / ${v.checkout || '—'}`
+                    );
+                }
+                output += `\n\n🧾 **Checkpoints (last 7 days)**\n`;
+                output += `\`morning / midday / checkout\`\n`;
+                output += `\`\`\`\n${dateLines.join('\n')}\n\`\`\``;
+                output += `\n_Use \`!checkin\` during open windows and \`!checkout\` at the end of day._`;
+            } else {
+                output += `\n\n🧾 **Checkpoints**\nℹ️ No checkpoint records yet. Use \`!checkin\` and \`!checkout\` when windows are open.`;
+            }
 
             return message.reply(output);
         } catch (error) {

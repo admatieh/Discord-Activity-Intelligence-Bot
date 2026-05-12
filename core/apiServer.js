@@ -156,6 +156,183 @@ function startApiServer(client) {
             }
 
             // ----------------------------------------------------------------
+            // Attendance checkpoints (daily check-in / checkout)
+            // ----------------------------------------------------------------
+            if (pathname === '/api/attendance/settings' && method === 'GET') {
+                const attendanceSettingsService = require('../services/attendanceSettingsService');
+                const guildId = query.guildId;
+                if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
+                const result = attendanceSettingsService.getCheckpointDefinitions(guildId);
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/settings/checkpoints' && method === 'POST') {
+                const attendanceSettingsService = require('../services/attendanceSettingsService');
+                const body = await readBody(req);
+                const result = attendanceSettingsService.createCheckpointDefinition(
+                    body.guildId,
+                    body,
+                    body.changedBy || 'dashboard'
+                );
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            let attendanceParams = matchPath(pathname, '/api/attendance/settings/checkpoints/:id');
+            if (attendanceParams && method === 'PATCH') {
+                const attendanceSettingsService = require('../services/attendanceSettingsService');
+                const body = await readBody(req);
+                const result = attendanceSettingsService.updateCheckpointDefinition(
+                    body.guildId || query.guildId,
+                    Number(attendanceParams.id),
+                    body,
+                    body.changedBy || 'dashboard'
+                );
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            attendanceParams = matchPath(pathname, '/api/attendance/settings/checkpoints/:id');
+            if (attendanceParams && method === 'DELETE') {
+                const attendanceSettingsService = require('../services/attendanceSettingsService');
+                const body = await readBody(req).catch(() => ({}));
+                const guildId = body.guildId || query.guildId;
+                const changedBy = body.changedBy || query.changedBy || 'dashboard';
+                const result = attendanceSettingsService.deleteCheckpointDefinition(guildId, Number(attendanceParams.id), changedBy);
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            attendanceParams = matchPath(pathname, '/api/attendance/settings/checkpoints/:id/update');
+            if (attendanceParams && method === 'POST') {
+                const attendanceSettingsService = require('../services/attendanceSettingsService');
+                const body = await readBody(req);
+                const result = attendanceSettingsService.updateCheckpointDefinition(
+                    body.guildId || query.guildId,
+                    Number(attendanceParams.id),
+                    body,
+                    body.changedBy || 'dashboard'
+                );
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            attendanceParams = matchPath(pathname, '/api/attendance/settings/checkpoints/:id/delete');
+            if (attendanceParams && method === 'POST') {
+                const attendanceSettingsService = require('../services/attendanceSettingsService');
+                const body = await readBody(req).catch(() => ({}));
+                const guildId = body.guildId || query.guildId;
+                const changedBy = body.changedBy || query.changedBy || 'dashboard';
+                const result = attendanceSettingsService.deleteCheckpointDefinition(guildId, Number(attendanceParams.id), changedBy);
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/today' && method === 'GET') {
+                const attendanceService = require('../services/attendanceCheckpointService');
+                const guildId = query.guildId;
+                const date = query.date || null;
+                if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
+                const result = attendanceService.getTodayAttendance({ guildId, date });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/week' && method === 'GET') {
+                const attendanceService = require('../services/attendanceCheckpointService');
+                const guildId = query.guildId;
+                const weekStart = query.weekStart;
+                const weekEnd = query.weekEnd;
+                if (!guildId || !weekStart || !weekEnd) {
+                    return sendJson(res, 400, { ok: false, error: 'guildId, weekStart, and weekEnd are required' });
+                }
+                const result = attendanceService.getWeeklyAttendance({ guildId, weekStart, weekEnd });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/month' && method === 'GET') {
+                const attendanceService = require('../services/attendanceCheckpointService');
+                const guildId = query.guildId;
+                const month = query.month;
+                const year = query.year;
+                if (!guildId || !month || !year) {
+                    return sendJson(res, 400, { ok: false, error: 'guildId, month, and year are required' });
+                }
+                const result = attendanceService.getMonthlyAttendance({ guildId, month, year });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/missing' && method === 'GET') {
+                const attendanceService = require('../services/attendanceCheckpointService');
+                const guildId = query.guildId;
+                const date = query.date;
+                if (!guildId || !date) return sendJson(res, 400, { ok: false, error: 'guildId and date are required' });
+                const result = attendanceService.getMissingCheckpoints({ guildId, date });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/manual' && method === 'POST') {
+                const attendanceService = require('../services/attendanceCheckpointService');
+                const body = await readBody(req);
+                const {
+                    guildId, userId, date, checkpointKey, status,
+                    reason, changedBy, displayName, username, dutyStation
+                } = body || {};
+                const result = attendanceService.upsertManualAttendance({
+                    guildId, userId, date, checkpointKey, status,
+                    reason, changedBy, displayName, username, dutyStation
+                });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            attendanceParams = matchPath(pathname, '/api/attendance/manual/:id');
+            if (attendanceParams && method === 'DELETE') {
+                const body = await readBody(req).catch(() => ({}));
+                const guildId = body.guildId || query.guildId;
+                if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
+                const info = db.prepare('DELETE FROM attendance_checkpoints WHERE id=? AND guild_id=?').run(Number(attendanceParams.id), guildId);
+                return sendJson(res, info.changes > 0 ? 200 : 404, info.changes > 0 ? { ok: true } : { ok: false, error: 'Record not found' });
+            }
+
+            attendanceParams = matchPath(pathname, '/api/attendance/manual/:id/delete');
+            if (attendanceParams && method === 'POST') {
+                const body = await readBody(req).catch(() => ({}));
+                const guildId = body.guildId || query.guildId;
+                if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
+                const info = db.prepare('DELETE FROM attendance_checkpoints WHERE id=? AND guild_id=?').run(Number(attendanceParams.id), guildId);
+                return sendJson(res, info.changes > 0 ? 200 : 404, info.changes > 0 ? { ok: true } : { ok: false, error: 'Record not found' });
+            }
+
+            if (pathname === '/api/attendance/export' && method === 'GET') {
+                const attendanceService = require('../services/attendanceCheckpointService');
+                const guildId = query.guildId;
+                const startDate = query.startDate;
+                const endDate = query.endDate;
+                const courseName = query.courseName || '';
+                if (!guildId || !startDate || !endDate) {
+                    return sendJson(res, 400, { ok: false, error: 'guildId, startDate, and endDate are required' });
+                }
+                const result = attendanceService.exportAttendanceCsv({ guildId, startDate, endDate, courseName, mode: 'range' });
+                if (!result.ok) return sendJson(res, 400, result);
+                return sendJson(res, 200, result);
+            }
+
+            if (pathname === '/api/attendance/import/preview' && method === 'POST') {
+                const attendanceImportService = require('../services/attendanceImportService');
+                const body = await readBody(req);
+                const result = attendanceImportService.previewImportRows({
+                    guildId: body.guildId,
+                    csvText: body.csvText
+                });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/import/commit' && method === 'POST') {
+                const attendanceImportService = require('../services/attendanceImportService');
+                const body = await readBody(req);
+                const result = attendanceImportService.commitImport({
+                    guildId: body.guildId,
+                    csvText: body.csvText,
+                    importedBy: body.importedBy || 'dashboard'
+                });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            // ----------------------------------------------------------------
             // GET /api/system/runtime
             // ----------------------------------------------------------------
             if (pathname === '/api/system/runtime' && method === 'GET') {
