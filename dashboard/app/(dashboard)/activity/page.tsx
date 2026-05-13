@@ -7,14 +7,13 @@ import PageHeader from "@/components/layout/PageHeader"
 import EmptyState from "@/components/states/EmptyState"
 import ErrorPanel from "@/components/states/ErrorPanel"
 import LoadingState from "@/components/states/LoadingState"
-import { apiFetch, formatTimeAgo, safeArray } from "@/lib/helpers"
+import { apiFetch, formatTimeAgo, safeArray, parseApiDate } from "@/lib/helpers"
 import type { ActivityEvent } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
   isToday,
   isYesterday,
   isValid,
-  parseISO,
 } from "date-fns"
 import { useWorkspace } from "@/components/providers/workspace-context"
 
@@ -29,8 +28,8 @@ const SEVERITY_FILTERS = [
 const LIMIT_OPTIONS = [25, 50, 100]
 
 function bucketFor(ts: string): "today" | "yesterday" | "earlier" {
-  const d = parseISO(ts)
-  if (!isValid(d)) return "earlier"
+  const d = parseApiDate(ts)
+  if (!d || !isValid(d)) return "earlier"
   if (isToday(d)) return "today"
   if (isYesterday(d)) return "yesterday"
   return "earlier"

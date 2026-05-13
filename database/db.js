@@ -512,8 +512,40 @@ function initializeSchema() {
     `);
 }
 
+function runAttendanceMigrations() {
+    ensureColumn(
+        'attendance_checkpoint_definitions',
+        'include_in_official_completion INTEGER DEFAULT 1',
+        'include_in_official_completion'
+    );
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_daily_overrides (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            student_id INTEGER,
+            attendance_date TEXT NOT NULL,
+            status TEXT NOT NULL,
+            signature_text TEXT,
+            notes TEXT,
+            changed_by TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT,
+            UNIQUE (guild_id, user_id, attendance_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_attendance_daily_overrides_guild_date
+            ON attendance_daily_overrides (guild_id, attendance_date);
+    `);
+
+    // ---- Roster sync columns (safe migrations) ----
+    ensureColumn('students', "source TEXT DEFAULT 'manual'", 'source');
+    ensureColumn('students', 'synced_from_discord INTEGER DEFAULT 0', 'synced_from_discord');
+    ensureColumn('students', 'last_synced_at TEXT', 'last_synced_at');
+}
+
 try {
     initializeSchema();
+    runAttendanceMigrations();
     console.log('[DATABASE] Schema ready. All tables initialized.');
 } catch (error) {
     console.error(`[DATABASE] Schema initialization failed: ${error.message}`);

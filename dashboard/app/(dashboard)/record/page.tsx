@@ -17,7 +17,7 @@ import {
 import PageHeader from "@/components/layout/PageHeader"
 import ErrorPanel from "@/components/states/ErrorPanel"
 import LoadingState from "@/components/states/LoadingState"
-import { apiFetch, safeArray } from "@/lib/helpers"
+import { apiFetch, safeArray, localDateTimeToUtcIso, toLocalDateInputValue } from "@/lib/helpers"
 import type { VoiceChannel, TextChannel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -136,7 +136,7 @@ export default function RecordSessionPage() {
             textChannelId: selectedText || undefined,
             title: sessionName.trim() || undefined,
             durationMinutes: effectiveDuration,
-            scheduledFor: new Date(scheduledAt).toISOString(),
+            scheduledFor: localDateTimeToUtcIso(scheduledAt),
             requestedBy: "dashboard-admin",
             payload: { tracking, options },
           }
@@ -330,7 +330,7 @@ export default function RecordSessionPage() {
                 type="datetime-local"
                 value={scheduledAt}
                 onChange={(e) => setScheduledAt(e.target.value)}
-                min={new Date().toISOString().slice(0, 16)}
+                min={toLocalDateInputValue(new Date())}
               />
             </div>
           )}

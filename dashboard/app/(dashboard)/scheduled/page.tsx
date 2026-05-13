@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -41,7 +42,8 @@ import type { ScheduledItem, VoiceChannel, TextChannel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import Link from "next/link"
-import { formatDistanceToNow, isValid, parseISO } from "date-fns"
+import { parseApiDate, formatTimeAgo } from "@/lib/helpers"
+import { isValid } from "date-fns"
 import { useWorkspace } from "@/components/providers/workspace-context"
 
 type FilterType = "all" | "session" | "message" | "scheduled" | "completed" | "failed" | "cancelled"
@@ -110,6 +112,7 @@ function RecurringSessionDialog({
   const [time, setTime] = useState("09:00")
   const [timezone, setTimezone] = useState("Asia/Beirut")
   const [duration, setDuration] = useState(60)
+  const [generateReport, setGenerateReport] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -160,6 +163,9 @@ function RecurringSessionDialog({
         time,
         timezone,
         durationMinutes: duration,
+        options: {
+          generateReport
+        },
         requestedBy: "dashboard",
       }),
     })
@@ -338,6 +344,17 @@ function RecurringSessionDialog({
                 placeholder="min"
               />
             </div>
+          </div>
+
+          {/* Options */}
+          <div className="space-y-1.5 pt-2">
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <Checkbox
+                checked={generateReport}
+                onCheckedChange={(checked) => setGenerateReport(!!checked)}
+              />
+              <span className="text-sm font-medium text-foreground">Generate report when finished</span>
+            </label>
           </div>
 
           {/* Preview */}
@@ -623,7 +640,7 @@ function ScheduledItemRow({
                 </span>
               )}
               {item.lastRunAt && (
-                <span>Last ran {formatDistanceToNow(parseISO(item.lastRunAt), { addSuffix: true })}</span>
+                <span>Last ran {formatTimeAgo(item.lastRunAt)}</span>
               )}
             </>
           ) : (
@@ -631,10 +648,10 @@ function ScheduledItemRow({
               <Calendar className="inline h-3 w-3 mr-1" />
               {formatDateTime(item.scheduledAt)}
               {item.scheduledAt &&
-                isValid(parseISO(item.scheduledAt)) && (
+                isValid(parseApiDate(item.scheduledAt)) && (
                   <span className="text-muted-foreground/80">
                     {" "}
-                    ({formatDistanceToNow(parseISO(item.scheduledAt), { addSuffix: true })})
+                    ({formatTimeAgo(item.scheduledAt)})
                   </span>
                 )}
             </span>

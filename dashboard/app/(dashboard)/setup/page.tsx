@@ -149,8 +149,52 @@ export default function SetupGuidePage() {
           </AccordionContent>
         </AccordionItem>
 
+        <AccordionItem value="student-role">
+          <AccordionTrigger>6. Student role setup (attendance roster)</AccordionTrigger>
+          <AccordionContent className="text-sm text-muted-foreground space-y-3">
+            <p>
+              The bot can automatically populate the attendance roster from Discord members who have a <strong>Student</strong> role.
+              This replaces manual student entry.
+            </p>
+            <ol className="list-decimal pl-5 space-y-2">
+              <li>Create a Discord role named <strong>Student</strong> in your server.</li>
+              <li>Assign the Student role to all students in the course.</li>
+              <li>Keep the <strong>Instructor</strong> role separate — instructors should not have the Student role unless they also attend as students.</li>
+              <li>
+                The bot needs <strong>Server Members Intent</strong> enabled in the Discord Developer Portal to scan members.
+                This is already configured in the bot code.
+              </li>
+              <li>
+                In the dashboard: <strong>Attendance → Roster → Sync from Discord</strong> to import all Student-role members.
+              </li>
+              <li>
+                When a student uses <code className="text-xs bg-muted px-1 rounded">!checkin</code> or{" "}
+                <code className="text-xs bg-muted px-1 rounded">!checkout</code>, the bot will automatically create a roster
+                record for them if they have the Student role.
+              </li>
+            </ol>
+            <p className="font-medium text-foreground">Environment variables</p>
+            <pre className="text-xs bg-muted/60 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
+              {`# In root .env
+STUDENT_ROLE_NAME=Student
+STUDENT_ROLE_IDS=`}
+            </pre>
+            <p className="text-xs">
+              If <code className="bg-muted px-1 rounded">STUDENT_ROLE_IDS</code> is set (comma-separated role IDs), the bot
+              uses those by default. Otherwise it falls back to matching by{" "}
+              <code className="bg-muted px-1 rounded">STUDENT_ROLE_NAME</code>.
+            </p>
+            <p className="text-xs mt-2">
+              <strong>Tip:</strong> You can skip setting these environment variables and instead choose the Student role directly from the dropdown in the <strong>Sync from Discord</strong> modal on the dashboard.
+            </p>
+            <p className="text-xs mt-2 text-muted-foreground">
+              If no role is selected or configured, check-in/checkout works without role gating (backward compatible).
+            </p>
+          </AccordionContent>
+        </AccordionItem>
+
         <AccordionItem value="instructor-access">
-          <AccordionTrigger>6. Instructor access</AccordionTrigger>
+          <AccordionTrigger>7. Instructor access</AccordionTrigger>
           <AccordionContent className="text-sm text-muted-foreground space-y-2">
             <p>Add instructors by assigning the Instructor role in Discord, or from an admin account in Discord run:</p>
             <ul className="list-none pl-0 font-mono text-xs bg-muted/50 rounded-md p-3 space-y-1">
@@ -162,11 +206,11 @@ export default function SetupGuidePage() {
         </AccordionItem>
 
         <AccordionItem value="env">
-          <AccordionTrigger>7. Environment variables</AccordionTrigger>
+          <AccordionTrigger>8. Environment variables</AccordionTrigger>
           <AccordionContent className="text-sm text-muted-foreground space-y-3">
             <p className="font-medium text-foreground">Root <code className="text-xs">.env</code> (bot)</p>
             <pre className="text-xs bg-muted/60 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
-{`DISCORD_TOKEN=
+              {`DISCORD_TOKEN=
 CLIENT_ID=
 GUILD_ID=
 BOT_API_PORT=4000
@@ -174,11 +218,13 @@ BOT_API_KEY=local_dashboard_key_123
 DATABASE_PATH=C:/path/to/your/data.db
 INSTRUCTOR_ROLE_NAME=Instructor
 INSTRUCTOR_ROLE_IDS=
+STUDENT_ROLE_NAME=Student
+STUDENT_ROLE_IDS=
 BOT_ADMIN_USER_IDS=`}
             </pre>
             <p className="font-medium text-foreground">Dashboard <code className="text-xs">.env.local</code></p>
             <pre className="text-xs bg-muted/60 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
-{`BOT_API_URL=http://127.0.0.1:4000/api
+              {`BOT_API_URL=http://127.0.0.1:4000/api
 BOT_API_KEY=local_dashboard_key_123
 DATABASE_PATH=C:/path/to/your/data.db
 NEXT_PUBLIC_API_BASE=/api`}
@@ -190,7 +236,7 @@ NEXT_PUBLIC_API_BASE=/api`}
         </AccordionItem>
 
         <AccordionItem value="run">
-          <AccordionTrigger>8. Run locally</AccordionTrigger>
+          <AccordionTrigger>9. Run locally</AccordionTrigger>
           <AccordionContent className="text-sm text-muted-foreground space-y-2">
             <p className="font-medium text-foreground">Bot (repo root)</p>
             <pre className="text-xs bg-muted/60 rounded-md p-3">npm install{"\n"}node index.js</pre>
@@ -201,7 +247,7 @@ NEXT_PUBLIC_API_BASE=/api`}
         </AccordionItem>
 
         <AccordionItem value="verify">
-          <AccordionTrigger>9. Verify setup</AccordionTrigger>
+          <AccordionTrigger>10. Verify setup</AccordionTrigger>
           <AccordionContent className="text-sm text-muted-foreground">
             <ul className="list-disc pl-5 space-y-1">
               <li>Bot shows online in Discord</li>
@@ -222,7 +268,7 @@ NEXT_PUBLIC_API_BASE=/api`}
         </AccordionItem>
 
         <AccordionItem value="troubleshoot">
-          <AccordionTrigger>10. Troubleshooting</AccordionTrigger>
+          <AccordionTrigger>11. Troubleshooting</AccordionTrigger>
           <AccordionContent className="text-sm text-muted-foreground space-y-3">
             <div>
               <p className="font-medium text-foreground">Bot offline</p>
@@ -256,7 +302,7 @@ NEXT_PUBLIC_API_BASE=/api`}
         </AccordionItem>
 
         <AccordionItem value="demo">
-          <AccordionTrigger>11. Live demo checklist</AccordionTrigger>
+          <AccordionTrigger>12. Live demo checklist</AccordionTrigger>
           <AccordionContent className="text-sm text-muted-foreground">
             <ol className="list-decimal pl-5 space-y-1">
               <li>Start bot → start dashboard</li>

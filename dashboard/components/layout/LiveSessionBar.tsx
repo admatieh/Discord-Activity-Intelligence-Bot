@@ -18,7 +18,7 @@ import { apiFetch, formatDuration, safeArray } from "@/lib/helpers"
 import type { Session } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import { differenceInMinutes, parseISO } from "date-fns"
+import { parseApiDate, formatElapsedSince } from "@/lib/helpers"
 
 export function LiveSessionBar() {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -64,11 +64,8 @@ export function LiveSessionBar() {
   if (sessions.length === 0) return null
 
   const primary = sessions[0]
-  const started = primary.startedAt ? parseISO(primary.startedAt) : null
-  const elapsed =
-    started && !Number.isNaN(started.getTime())
-      ? Math.max(0, differenceInMinutes(new Date(), started))
-      : null
+  const started = primary.startedAt ? parseApiDate(primary.startedAt) : null
+  const elapsedStr = started ? formatElapsedSince(primary.startedAt) : null
 
   return (
     <>
@@ -89,7 +86,7 @@ export function LiveSessionBar() {
             <p className="text-[11px] text-muted-foreground truncate">
               {primary.name || "Live session"}
               {primary.voiceChannelName ? ` · ${primary.voiceChannelName}` : ""}
-              {elapsed != null ? ` · ${formatDuration(elapsed)} elapsed` : ""}
+              {elapsedStr != null ? ` · ${elapsedStr} elapsed` : ""}
             </p>
           </div>
         </div>

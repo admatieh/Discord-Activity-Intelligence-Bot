@@ -7,13 +7,15 @@ import ErrorPanel from "@/components/states/ErrorPanel"
 import LoadingState from "@/components/states/LoadingState"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { apiFetch, safeArray } from "@/lib/helpers"
+import { apiFetch, safeArray, parseApiDate, formatDateShort } from "@/lib/helpers"
 import { useWorkspace } from "@/components/providers/workspace-context"
-import { Calendar, Download, RefreshCw, ClipboardCheck, Upload, AlertTriangle, Users } from "lucide-react"
+import { Calendar, Download, RefreshCw, ClipboardCheck, AlertTriangle, Users, Cloud } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
-import Papa from "papaparse"
+import { OfficialSheetsPanel } from "./official-sheets-panel"
+import { ManualStudentCombobox } from "./manual-student-combobox"
+import { extractRosterStudentsFromApiResponse } from "@/lib/rosterStudentUtils"
 import {
   Select,
   SelectContent,
@@ -25,8 +27,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 
 type AttendanceRow = { id?: number; user_id: string; username?: string; display_name?: string; duty_station?: string; attendance_date: string; checkpoint_key: string; checkpoint_label?: string; status: string; checked_at?: string; local_checked_at?: string; notes?: string; source?: string }
 type MissingItem = { userId: string; name: string; checkpointKey: string; attendanceDate: string }
-type Student = { id: number; full_name: string; preferred_name?: string; email?: string; discord_user_id?: string; discord_username?: string; duty_station?: string; student_code?: string; active: number }
-type Cohort = { id: number; name: string; active: number }
+type Student = { id: number; full_name: string; preferred_name?: string; email?: string; discord_user_id?: string; discord_username?: string; duty_station?: string; student_code?: string; active: number; source?: string | null; synced_from_discord?: number | null; last_synced_at?: string | null }
+type Cohort = { id: number; name: string; active: number; course_name?: string | null }
 type CheckpointDef = {
   id: number
   key: string
@@ -37,37 +39,34 @@ type CheckpointDef = {
   lateAfterMinutes: number
   closesAfterMinutes: number | null
   allowLateSubmission: boolean
+  allowAfterCloseManualOnly?: boolean
   required: boolean
   active: boolean
+  includeInOfficialCompletion?: boolean
   sortOrder: number
 }
 
-const ROSTER_FIELDS = [
-  "fullName",
-  "preferredName",
-  "email",
-  "discordUserId",
-  "discordUsername",
-  "dutyStation",
-  "studentCode",
-  "cohort",
-] as const
+type DailyStatusPayload = {
+  status: string
+  exportable: boolean
+  completedRequired: number
+  totalRequired: number
+}
 
-const FIELD_LABELS: Record<(typeof ROSTER_FIELDS)[number], string> = {
-  fullName: "Full Name",
-  preferredName: "Preferred Name",
-  email: "Email",
-  discordUserId: "Discord User ID",
-  discordUsername: "Discord Username",
-  dutyStation: "Duty Station",
-  studentCode: "Student Code",
-  cohort: "Cohort",
+type SummaryRangePayload = {
+  byUser?: Record<string, Record<string, DailyStatusPayload>>
+  rosterConfigured?: boolean
+  warning?: string | null
 }
 
 function statusBadge(status: string | undefined | null) {
   const s = String(status || "")
   if (s === "present") return <Badge className="bg-success text-success-foreground">Present</Badge>
   if (s === "late") return <Badge className="bg-warning text-warning-foreground">Late</Badge>
+  if (s === "complete" || s === "completed") return <Badge className="bg-success text-success-foreground">Complete</Badge>
+  if (s === "complete_late") return <Badge className="bg-warning text-warning-foreground">Complete (late)</Badge>
+  if (s === "partial") return <Badge variant="secondary">Partial</Badge>
+  if (s === "missing") return <Badge variant="destructive">Missing</Badge>
   if (s === "excused") return <Badge variant="secondary">Excused</Badge>
   if (s === "manual") return <Badge variant="outline">Manual</Badge>
   if (!s) return <Badge variant="outline">—</Badge>
@@ -103,7 +102,10 @@ export default function AttendancePage() {
   const [month, setMonth] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`)
   const [rows, setRows] = useState<AttendanceRow[]>([])
   const [missing, setMissing] = useState<MissingItem[]>([])
-  const [defs, setDefs] = useState<CheckpointDef[]>([])
+  const [allDefs, setAllDefs] = useState<CheckpointDef[]>([])
+  const [summaryWeek, setSummaryWeek] = useState<SummaryRangePayload | null>(null)
+  const [summaryMonth, setSummaryMonth] = useState<SummaryRangePayload | null>(null)
+  const [dailyByUser, setDailyByUser] = useState<Record<string, Record<string, DailyStatusPayload>> | null>(null)
   const [cohorts, setCohorts] = useState<Cohort[]>([])
   const [selectedCohortId, setSelectedCohortId] = useState<string>("all")
   const [students, setStudents] = useState<Student[]>([])
@@ -125,23 +127,55 @@ export default function AttendancePage() {
     cohortId: "",
     active: true,
   })
-  const [csvHeaders, setCsvHeaders] = useState<string[]>([])
-  const [columnMap, setColumnMap] = useState<Record<string, string>>({})
-  const [csvPreview, setCsvPreview] = useState<Record<string, string>[]>([])
-  const [csvText, setCsvText] = useState("")
-  const [rosterImportResult, setRosterImportResult] = useState<any>(null)
+  const [manualStudentId, setManualStudentId] = useState<number | null>(null)
+  const [dailyOverrideStudentId, setDailyOverrideStudentId] = useState<number | null>(null)
   const [manual, setManual] = useState({
-    userId: "",
     checkpointKey: "",
     status: "present",
     notes: "",
+    signatureText: "",
   })
+  const [dailyOverride, setDailyOverride] = useState({
+    status: "completed",
+    signatureText: "",
+    notes: "",
+  })
+  const [manualTabNotice, setManualTabNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
+  const [officialSheetsRefreshNonce, setOfficialSheetsRefreshNonce] = useState(0)
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMode, setSyncMode] = useState<"append" | "mirror">("append")
+  const [syncCohortId, setSyncCohortId] = useState<string>("")
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const [syncRoles, setSyncRoles] = useState<any[]>([])
+  const [syncRolesLoading, setSyncRolesLoading] = useState(false)
+  const [syncSelectedRoleId, setSyncSelectedRoleId] = useState<string | null>(null)
+  const [syncSummary, setSyncSummary] = useState<{
+    scannedMembers: number
+    matchedStudentRole: number
+    created: number
+    updated: number
+    linked: number
+    deactivated: number
+    skippedBots: number
+    skippedNoStudentRole: number
+    errors: { userId: string; error: string }[]
+    warnings: string[]
+  } | null>(null)
+  const [mirrorAcknowledged, setMirrorAcknowledged] = useState(false)
+  const [showAdvancedSync, setShowAdvancedSync] = useState(false)
 
   const load = useCallback(
     async (isRefresh = false) => {
       if (!selectedGuildId) {
         setRows([])
         setMissing([])
+        setDailyByUser(null)
+        setSummaryWeek(null)
+        setSummaryMonth(null)
+        setAllDefs([])
+        setCohorts([])
+        setStudents([])
         setLoading(false)
         setRefreshing(false)
         setError(null)
@@ -154,45 +188,59 @@ export default function AttendancePage() {
 
       const wr = weekRange(date)
       const [yyyy, mm] = month.split("-")
-      const [todayRes, missingRes, settingsRes, cohortsRes, studentsRes, weekRes, monthRes] = await Promise.all([
-        apiFetch<any>(`/api/attendance/today?guildId=${selectedGuildId}&date=${date}`),
-        apiFetch<any>(`/api/attendance/missing?guildId=${selectedGuildId}&date=${date}`),
-        apiFetch<{ definitions?: CheckpointDef[] }>(`/api/attendance/settings?guildId=${selectedGuildId}`),
-        apiFetch<any>(`/api/roster/cohorts?guildId=${selectedGuildId}`),
-        apiFetch<any>(
-          `/api/roster/students?guildId=${selectedGuildId}${selectedCohortId !== "all" ? `&cohortId=${selectedCohortId}` : ""}`
-        ),
-        apiFetch<any>(`/api/attendance/week?guildId=${selectedGuildId}&weekStart=${wr.weekStart}&weekEnd=${wr.weekEnd}`),
-        apiFetch<any>(`/api/attendance/month?guildId=${selectedGuildId}&month=${mm}&year=${yyyy}`),
-      ])
+      const monthStart = `${yyyy}-${String(Number(mm)).padStart(2, "0")}-01`
+      const monthEnd = `${yyyy}-${String(Number(mm)).padStart(2, "0")}-${String(new Date(Number(yyyy), Number(mm), 0).getDate()).padStart(2, "0")}`
+      const cohortQ = selectedCohortId !== "all" ? `&cohortId=${selectedCohortId}` : ""
+
+      const [todayRes, missingRes, settingsRes, cohortsRes, studentsRes, summaryWeekRes, summaryMonthRes] =
+        await Promise.all([
+          apiFetch<any>(`/api/attendance/today?guildId=${selectedGuildId}&date=${date}${cohortQ}`),
+          apiFetch<any>(`/api/attendance/missing?guildId=${selectedGuildId}&date=${date}`),
+          apiFetch<{ definitions?: CheckpointDef[] }>(`/api/attendance/settings?guildId=${selectedGuildId}`),
+          apiFetch<any>(`/api/roster/cohorts?guildId=${selectedGuildId}`),
+          apiFetch<any>(
+            `/api/roster/students?guildId=${selectedGuildId}${selectedCohortId !== "all" ? `&cohortId=${selectedCohortId}` : ""}&active=1`
+          ),
+          apiFetch<any>(
+            `/api/attendance/summary-range?guildId=${selectedGuildId}&startDate=${wr.weekStart}&endDate=${wr.weekEnd}${cohortQ}`
+          ),
+          apiFetch<any>(
+            `/api/attendance/summary-range?guildId=${selectedGuildId}&startDate=${monthStart}&endDate=${monthEnd}${cohortQ}`
+          ),
+        ])
 
       if (!todayRes.ok) {
         setError(todayRes.error ?? "Could not load attendance.")
         setRows([])
+        setDailyByUser(null)
       } else {
         const payload = todayRes.data as any
         const list = safeArray<AttendanceRow>(payload?.rows)
         setRows(list)
+        setDailyByUser((payload?.dailyByUser as Record<string, Record<string, DailyStatusPayload>>) || null)
       }
 
       if (missingRes.ok) {
         const payload = missingRes.data as any
         const list = safeArray<MissingItem>(payload?.missing)
         setMissing(list)
-        setRosterWarning(payload?.warning || null)
       } else {
         setMissing([])
-        setRosterWarning(null)
       }
+
+      let rw: string | null = null
+      if (todayRes.ok) rw = (todayRes.data as any)?.rosterWarning ?? rw
+      if (missingRes.ok) rw = (missingRes.data as any)?.warning ?? rw
+      setRosterWarning(rw)
 
       if (settingsRes.ok) {
         const d = safeArray<CheckpointDef>((settingsRes.data as any)?.definitions)
-        setDefs(d.filter((x) => x.active))
-        if (!manual.checkpointKey && d[0]?.key) {
-          setManual((m) => ({ ...m, checkpointKey: d[0].key }))
+        setAllDefs(d)
+        if (!manual.checkpointKey && d.filter((x) => x.active)[0]?.key) {
+          setManual((m) => ({ ...m, checkpointKey: d.filter((x) => x.active)[0].key }))
         }
       } else {
-        setDefs([])
+        setAllDefs([])
       }
       if (cohortsRes.ok) {
         const list = safeArray<Cohort>((cohortsRes.data as any)?.cohorts)
@@ -201,14 +249,21 @@ export default function AttendancePage() {
         setCohorts([])
       }
       if (studentsRes.ok) {
-        setStudents(safeArray<Student>((studentsRes.data as any)?.students))
+        const list = extractRosterStudentsFromApiResponse(studentsRes as { ok?: boolean; data?: unknown; students?: unknown })
+        setStudents(list as Student[])
       } else {
         setStudents([])
       }
-      if (weekRes.ok) setWeekRows(safeArray<AttendanceRow>((weekRes.data as any)?.rows))
-      else setWeekRows([])
-      if (monthRes.ok) setMonthRows(safeArray<AttendanceRow>((monthRes.data as any)?.rows))
-      else setMonthRows([])
+      if (summaryWeekRes.ok) {
+        setSummaryWeek((summaryWeekRes.data as SummaryRangePayload) || null)
+      } else {
+        setSummaryWeek(null)
+      }
+      if (summaryMonthRes.ok) {
+        setSummaryMonth((summaryMonthRes.data as SummaryRangePayload) || null)
+      } else {
+        setSummaryMonth(null)
+      }
 
       setLoading(false)
       setRefreshing(false)
@@ -216,8 +271,23 @@ export default function AttendancePage() {
     [selectedGuildId, date, month, manual.checkpointKey, selectedCohortId]
   )
 
-  const [weekRows, setWeekRows] = useState<AttendanceRow[]>([])
-  const [monthRows, setMonthRows] = useState<AttendanceRow[]>([])
+  useEffect(() => {
+    setManualStudentId(null)
+    setDailyOverrideStudentId(null)
+    setManualTabNotice(null)
+  }, [selectedGuildId])
+
+  useEffect(() => {
+    if (manualStudentId == null) return
+    if (!students.some((s) => s.id === manualStudentId)) setManualStudentId(null)
+  }, [students, manualStudentId])
+
+  useEffect(() => {
+    if (dailyOverrideStudentId == null) return
+    if (!students.some((s) => s.id === dailyOverrideStudentId)) setDailyOverrideStudentId(null)
+  }, [students, dailyOverrideStudentId])
+
+  const activeDefs = useMemo(() => allDefs.filter((d) => d.active).sort((a, b) => a.sortOrder - b.sortOrder), [allDefs])
 
   useEffect(() => {
     void load()
@@ -234,69 +304,91 @@ export default function AttendancePage() {
     return Array.from(map.entries()).map(([userId, v]) => ({ userId, ...v }))
   }, [rows])
 
-  const requiredDefs = useMemo(() => defs.filter((d) => d.active && d.required), [defs])
-  const requiredCount = requiredDefs.length || 1
+  const todayStudentRows = useMemo(() => {
+    if (!students.length) return byStudent
+    return students.map((s) => {
+      const userId = s.discord_user_id || `student:${s.id}`
+      const hit = byStudent.find((b) => b.userId === userId)
+      return hit || { userId, name: s.preferred_name || s.full_name, byKey: {} }
+    })
+  }, [students, byStudent])
 
   const weekMatrix = useMemo(() => {
-    const byStudentDay = new Map<string, Map<string, Set<string>>>()
-    for (const r of weekRows) {
-      if (r.status === "missing") continue
-      const m = byStudentDay.get(r.user_id) || new Map<string, Set<string>>()
-      const s = m.get(r.attendance_date) || new Set<string>()
-      s.add(r.checkpoint_key)
-      m.set(r.attendance_date, s)
-      byStudentDay.set(r.user_id, m)
-    }
     const wr = weekRange(date)
     const days: string[] = []
     for (let d = new Date(`${wr.weekStart}T00:00:00`); d <= new Date(`${wr.weekEnd}T00:00:00`); d.setDate(d.getDate() + 1)) {
       days.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`)
     }
+    const byUser = summaryWeek?.byUser || {}
     return students.map((s) => {
       const userId = s.discord_user_id || `student:${s.id}`
-      const byDay = byStudentDay.get(userId) || new Map<string, Set<string>>()
-      let completed = 0
-      let late = 0
-      for (const r of weekRows) if (r.user_id === userId && r.status === "late") late++
-      const dayCells = days.map((d) => {
-        const n = (byDay.get(d)?.size || 0)
-        completed += n
-        return { date: d, value: `${n}/${requiredCount}` }
+      const dayCells = days.map((dt) => {
+        const st = byUser[userId]?.[dt]
+        return { date: dt, status: st?.status || "missing", exportable: Boolean(st?.exportable) }
       })
-      const totalRequired = days.length * requiredCount
+      const completeDays = dayCells.filter((c) => c.status === "complete" || c.status === "complete_late").length
+      const partialDays = dayCells.filter((c) => c.status === "partial").length
       return {
         student: s,
         dayCells,
-        completion: `${completed}/${totalRequired}`,
-        missing: Math.max(0, totalRequired - completed),
-        late,
+        completeDays,
+        partialDays,
       }
     })
-  }, [weekRows, students, requiredCount, date])
+  }, [students, summaryWeek, date])
 
   const monthSummary = useMemo(() => {
     const [yyyy, mm] = month.split("-")
     const daysInMonth = new Date(Number(yyyy), Number(mm), 0).getDate()
-    const requiredTotal = daysInMonth * requiredCount
+    const byUser = summaryMonth?.byUser || {}
     return students.map((s) => {
       const userId = s.discord_user_id || `student:${s.id}`
-      const mine = monthRows.filter((r) => r.user_id === userId)
-      const completed = mine.filter((r) => r.status !== "missing").length
-      const late = mine.filter((r) => r.status === "late").length
-      const excused = mine.filter((r) => r.status === "excused").length
-      const manualCount = mine.filter((r) => r.status === "manual" || r.source === "dashboard_manual").length
-      const missingCount = Math.max(0, requiredTotal - completed)
-      const pct = Math.round((completed / Math.max(1, requiredTotal)) * 100)
-      return { student: s, requiredTotal, completed, late, missingCount, excused, manualCount, pct }
+      let complete = 0
+      let completeLate = 0
+      let partial = 0
+      let missing = 0
+      let exportableDays = 0
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${yyyy}-${String(Number(mm)).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+        const st = byUser[userId]?.[dateStr]
+        if (!st) {
+          missing++
+          continue
+        }
+        if (st.status === "complete") complete++
+        else if (st.status === "complete_late") completeLate++
+        else if (st.status === "partial") partial++
+        else if (st.status === "missing") missing++
+        if (st.exportable) exportableDays++
+      }
+      const pct = Math.round(((complete + completeLate) / Math.max(1, daysInMonth)) * 100)
+      return { student: s, daysInMonth, complete, completeLate, partial, missing, exportableDays, pct }
     })
-  }, [students, monthRows, month, requiredCount])
+  }, [students, summaryMonth, month])
 
   const needsAttention = useMemo(() => {
     const lateToday = rows.filter((r) => r.status === "late")
-    const incompleteWeek = weekMatrix.filter((w) => w.missing > 0)
-    const importReview = monthRows.filter((r) => r.source === "csv_import" && r.status === "manual")
-    return { lateToday, incompleteWeek, importReview }
-  }, [rows, weekMatrix, monthRows])
+    const partialToday = students
+      .map((s) => {
+        const userId = s.discord_user_id || `student:${s.id}`
+        const st = dailyByUser?.[userId]?.[date]
+        return st?.status === "partial" || st?.status === "missing"
+          ? { userId, name: s.preferred_name || s.full_name, status: st?.status, exportable: st?.exportable }
+          : null
+      })
+      .filter(Boolean) as { userId: string; name: string; status: string; exportable: boolean }[]
+    const notExportable = students
+      .map((s) => {
+        const userId = s.discord_user_id || `student:${s.id}`
+        const st = dailyByUser?.[userId]?.[date]
+        if (st && !st.exportable && st.status === "partial") {
+          return { userId, name: s.preferred_name || s.full_name, status: st.status }
+        }
+        return null
+      })
+      .filter(Boolean) as { userId: string; name: string; status: string }[]
+    return { lateToday, partialToday, notExportable, incompleteWeek: weekMatrix.filter((w) => w.partialDays > 0) }
+  }, [rows, students, dailyByUser, date, weekMatrix])
 
   async function downloadCsv(range: "today" | "week" | "month") {
     if (!selectedGuildId) return
@@ -339,7 +431,6 @@ export default function AttendancePage() {
     if (!selectedGuildId) return
     const payload = {
       guildId: selectedGuildId,
-      key: `checkpoint_${Date.now()}`,
       label: "New checkpoint",
       commandType: "checkin",
       targetTime: "10:00",
@@ -349,7 +440,8 @@ export default function AttendancePage() {
       allowLateSubmission: true,
       required: true,
       active: true,
-      sortOrder: (defs.at(-1)?.sortOrder ?? 0) + 10,
+      includeInOfficialCompletion: true,
+      sortOrder: (allDefs.at(-1)?.sortOrder ?? 0) + 10,
     }
     const res = await apiFetch("/api/attendance/settings/checkpoints", {
       method: "POST",
@@ -366,45 +458,6 @@ export default function AttendancePage() {
       body: JSON.stringify({ guildId: selectedGuildId, ...def }),
     })
     if (!res.ok) setError(res.error ?? "Could not update checkpoint.")
-    await load(true)
-  }
-
-  async function previewImport() {
-    if (!selectedGuildId) return
-    const res = await apiFetch<any>("/api/roster/import", {
-      method: "POST",
-      body: JSON.stringify({
-        guildId: selectedGuildId,
-        csvText,
-        dryRun: true,
-        columnMap,
-        cohortId: selectedCohortId !== "all" ? Number(selectedCohortId) : null,
-      }),
-    })
-    if (!res.ok) {
-      setError(res.error ?? "Import preview failed.")
-      return
-    }
-    setRosterImportResult(res.data)
-  }
-
-  async function commitRosterImport() {
-    if (!selectedGuildId) return
-    const res = await apiFetch<any>("/api/roster/import", {
-      method: "POST",
-      body: JSON.stringify({
-        guildId: selectedGuildId,
-        csvText,
-        dryRun: false,
-        columnMap,
-        cohortId: selectedCohortId !== "all" ? Number(selectedCohortId) : null,
-      }),
-    })
-    if (!res.ok) {
-      setError(res.error ?? "Import failed.")
-      return
-    }
-    setRosterImportResult(res.data)
     await load(true)
   }
 
@@ -427,6 +480,83 @@ export default function AttendancePage() {
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
+  }
+
+  async function fetchRoles() {
+    if (!selectedGuildId) return
+    setSyncRolesLoading(true)
+    const res = await apiFetch<any>(`/api/discord/guilds/${selectedGuildId}/roles`)
+    setSyncRolesLoading(false)
+    if (res.ok) {
+      const result = res as any
+      const roles = Array.isArray(result?.roles) ? result.roles :
+                    Array.isArray(result?.data?.roles) ? result.data.roles :
+                    Array.isArray(result?.data) ? result.data :
+                    Array.isArray(result) ? result :
+                    []
+      // Filter out managed/bot roles unless needed? 
+      // The user asked to "Hide or disable managed/bot roles unless there is a reason to show them."
+      // Since managed = true for bot roles and integration roles, we can filter them out.
+      const filtered = roles.filter((r: any) => !r.managed)
+      setSyncRoles(filtered)
+      
+      // Auto-select
+      const savedRoleId = localStorage.getItem(`syncRole_${selectedGuildId}`)
+      if (savedRoleId && filtered.find((r: any) => r.id === savedRoleId)) {
+        setSyncSelectedRoleId(savedRoleId)
+      } else {
+        // Fallback to name "Student"
+        const studentRole = filtered.find((r: any) => r.name.toLowerCase() === "student")
+        if (studentRole) {
+          setSyncSelectedRoleId(studentRole.id)
+        } else {
+          setSyncSelectedRoleId(null)
+        }
+      }
+    } else {
+      setSyncRoles([])
+    }
+  }
+
+  async function runDiscordSync() {
+    if (!selectedGuildId) return
+    setSyncing(true)
+    setSyncSummary(null)
+    setSyncError(null)
+    const selectedRoleObj = syncRoles.find(r => r.id === syncSelectedRoleId)
+    const res = await apiFetch<any>("/api/roster/sync-discord", {
+      method: "POST",
+      body: JSON.stringify({
+        guildId: selectedGuildId,
+        cohortId: syncCohortId || null,
+        mode: syncMode,
+        syncedBy: "dashboard",
+        studentRoleId: selectedRoleObj?.id || null,
+        studentRoleName: selectedRoleObj?.name || null,
+      }),
+    })
+    setSyncing(false)
+    if (!res.ok) {
+      setSyncError(res.error ?? "Discord sync failed.")
+      setError(res.error ?? "Discord sync failed.")
+      return
+    }
+    const summary = (res.data as any)?.summary ?? null
+    setSyncSummary(summary)
+    await load(true)
+  }
+
+  async function toggleStudentActive(studentId: number, active: boolean) {
+    if (!selectedGuildId) return
+    const res = await apiFetch<any>(`/api/roster/students/${studentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ guildId: selectedGuildId, active }),
+    })
+    if (!res.ok) {
+      setError(res.error ?? "Could not update student.")
+      return
+    }
+    await load(true)
   }
 
   async function saveStudent() {
@@ -458,20 +588,81 @@ export default function AttendancePage() {
 
   async function saveManual() {
     if (!selectedGuildId) return
+    setManualTabNotice(null)
+    const student = students.find((s) => s.id === manualStudentId)
+    if (!student) {
+      setManualTabNotice({ kind: "err", text: "Select a student first." })
+      return
+    }
+    if (!manual.checkpointKey) {
+      setManualTabNotice({ kind: "err", text: "Select a checkpoint." })
+      return
+    }
+    const discordId =
+      student.discord_user_id != null && String(student.discord_user_id).trim() !== ""
+        ? String(student.discord_user_id).trim()
+        : null
     const res = await apiFetch("/api/attendance/manual", {
       method: "POST",
       body: JSON.stringify({
         guildId: selectedGuildId,
-        userId: manual.userId,
-        displayName: students.find((s) => (s.discord_user_id || `student:${s.id}`) === manual.userId)?.full_name || undefined,
+        studentId: student.id,
+        userId: discordId,
+        displayName: student.full_name,
+        username: student.discord_username != null && String(student.discord_username).trim() !== "" ? student.discord_username : null,
         date,
         checkpointKey: manual.checkpointKey,
         status: manual.status,
-        reason: manual.notes,
+        notes: manual.notes || undefined,
+        changedBy: "dashboard",
+        signatureText: manual.signatureText || undefined,
+        source: "dashboard_manual",
+      }),
+    })
+    if (!res.ok) {
+      setManualTabNotice({ kind: "err", text: res.error ?? "Manual correction failed." })
+      setError(res.error ?? "Manual correction failed.")
+      return
+    }
+    setError(null)
+    setManualTabNotice({ kind: "ok", text: "Checkpoint correction saved." })
+    setOfficialSheetsRefreshNonce((n) => n + 1)
+    await load(true)
+  }
+
+  async function saveDailyOverride() {
+    if (!selectedGuildId) return
+    setManualTabNotice(null)
+    const student = students.find((s) => s.id === dailyOverrideStudentId)
+    if (!student) {
+      setManualTabNotice({ kind: "err", text: "Select a student for the daily override." })
+      return
+    }
+    const discordId =
+      student.discord_user_id != null && String(student.discord_user_id).trim() !== ""
+        ? String(student.discord_user_id).trim()
+        : null
+    const res = await apiFetch("/api/attendance/daily-override", {
+      method: "POST",
+      body: JSON.stringify({
+        guildId: selectedGuildId,
+        studentId: student.id,
+        userId: discordId,
+        attendanceDate: date,
+        status: dailyOverride.status,
+        signatureText: dailyOverride.signatureText || undefined,
+        notes: dailyOverride.notes || undefined,
         changedBy: "dashboard",
       }),
     })
-    if (!res.ok) setError(res.error ?? "Manual correction failed.")
+    if (!res.ok) {
+      setManualTabNotice({ kind: "err", text: res.error ?? "Daily override failed." })
+      setError(res.error ?? "Daily override failed.")
+      return
+    }
+    setError(null)
+    setManualTabNotice({ kind: "ok", text: "Daily override saved." })
+    setOfficialSheetsRefreshNonce((n) => n + 1)
     await load(true)
   }
 
@@ -479,7 +670,7 @@ export default function AttendancePage() {
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <PageHeader
         title="Attendance"
-        description="Daily check-ins and checkout checkpoints. Students use !checkin / !checkout during open windows."
+        description="Live checkpoints show partial progress. Official exports only include days where every required checkpoint is satisfied, unless an instructor uses manual corrections or a daily override."
         action={
           <div className="flex items-center gap-2">
             <Button
@@ -508,15 +699,20 @@ export default function AttendancePage() {
         />
       ) : (
           <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-          <TabsList>
+          <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+            Official sheets only include completed attendance days. Partial check-ins remain visible in Today / Needs
+            Attention but are not exported unless manually approved. Students must complete all required checkpoints for
+            the day to be counted as complete. Manual corrections let instructors handle exceptions.
+          </div>
+          <TabsList className="flex flex-wrap h-auto gap-1">
             <TabsTrigger value="today">Today</TabsTrigger>
             <TabsTrigger value="week">Week</TabsTrigger>
             <TabsTrigger value="month">Month</TabsTrigger>
             <TabsTrigger value="needs">Needs Attention</TabsTrigger>
             <TabsTrigger value="roster">Roster</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
-            <TabsTrigger value="import-export">Import / Export</TabsTrigger>
             <TabsTrigger value="manual">Manual Corrections</TabsTrigger>
+            <TabsTrigger value="official">Official Sheets</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="today" className="space-y-4">
@@ -539,31 +735,42 @@ export default function AttendancePage() {
             <LoadingState message="Loading attendance…" />
           ) : error ? (
             <ErrorPanel message={error} offline={error.includes("offline")} />
-          ) : byStudent.length === 0 ? (
+          ) : todayStudentRows.length === 0 ? (
             <EmptyState
               icon={ClipboardCheck}
-              title="No attendance check-ins recorded yet"
-              description="Students can type !checkin during morning/midday windows, and !checkout during the checkout window."
+              title="No students or attendance for this view"
+              description="Add students to the roster, or wait for students to use !checkin / !checkout during open windows."
             />
           ) : (
             <div className="rounded-lg border border-border bg-card overflow-x-auto">
-              <table className="min-w-[820px] w-full text-sm">
+              <table className="min-w-[920px] w-full text-sm">
                 <thead className="border-b border-border text-xs text-muted-foreground">
                   <tr>
-                    <th className="text-left font-medium px-4 py-3 w-[280px]">Student</th>
-                    {defs.map((d) => (
+                    <th className="text-left font-medium px-4 py-3 w-[220px]">Student</th>
+                    <th className="text-left font-medium px-4 py-3 w-[120px]">Daily status</th>
+                    {activeDefs.map((d) => (
                       <th key={d.key} className="text-left font-medium px-4 py-3">{d.label}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {byStudent.map((s) => (
+                  {todayStudentRows.map((s) => {
+                    const ds = dailyByUser?.[s.userId]?.[date]
+                    return (
                     <tr key={s.userId} className="hover:bg-accent/10">
                       <td className="px-4 py-3">
                         <p className="font-medium text-foreground truncate">{s.name}</p>
                         <p className="text-xs text-muted-foreground font-mono truncate">{s.userId}</p>
                       </td>
-                      {defs.map((d) => {
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-1">
+                          {statusBadge(ds?.status)}
+                          {!ds?.exportable && ds?.status && ds.status !== "missing" && (
+                            <span className="text-[10px] text-muted-foreground">Not on official sheet</span>
+                          )}
+                        </div>
+                      </td>
+                      {activeDefs.map((d) => {
                         const cell = s.byKey[d.key]
                         return (
                           <td key={`${s.userId}-${d.key}`} className="px-4 py-3">
@@ -577,7 +784,8 @@ export default function AttendancePage() {
                         )
                       })}
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -587,7 +795,7 @@ export default function AttendancePage() {
             <div className="rounded-lg border border-amber-400/40 bg-amber-50 p-4 text-amber-900">
               <div className="flex items-start justify-between gap-3">
                 <p className="text-sm font-medium">{rosterWarning}</p>
-                <Button size="sm" variant="outline" onClick={() => setTab("roster")}>Import roster</Button>
+                <Button size="sm" variant="outline" onClick={() => setTab("roster")}>Open roster</Button>
               </div>
             </div>
           )}
@@ -615,7 +823,7 @@ export default function AttendancePage() {
 
           <TabsContent value="week" className="rounded-lg border border-border bg-card p-5">
             <div className="flex items-center justify-between gap-3 mb-3">
-              <p className="text-sm font-semibold">Weekly matrix</p>
+              <p className="text-sm font-semibold">Weekly daily status</p>
               <Button size="sm" variant="outline" onClick={() => void downloadCsv("week")}>Export week CSV</Button>
             </div>
             <div className="rounded-md border border-border overflow-x-auto">
@@ -626,9 +834,8 @@ export default function AttendancePage() {
                     {weekRange(date) && weekMatrix[0]?.dayCells?.map((d) => (
                       <th key={d.date} className="text-left p-2">{d.date.slice(5)}</th>
                     ))}
-                    <th className="text-left p-2">Completion</th>
-                    <th className="text-left p-2">Missing</th>
-                    <th className="text-left p-2">Late</th>
+                    <th className="text-left p-2">Complete days</th>
+                    <th className="text-left p-2">Partial days</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -637,14 +844,11 @@ export default function AttendancePage() {
                       <td className="p-2">{w.student.preferred_name || w.student.full_name}</td>
                       {w.dayCells.map((c) => (
                         <td key={`${w.student.id}-${c.date}`} className="p-2">
-                          <Badge variant={c.value.startsWith(`${requiredCount}/`) ? "default" : c.value.startsWith("0/") ? "destructive" : "secondary"}>
-                            {c.value}
-                          </Badge>
+                          {statusBadge(c.status)}
                         </td>
                       ))}
-                      <td className="p-2">{w.completion}</td>
-                      <td className="p-2">{w.missing}</td>
-                      <td className="p-2">{w.late}</td>
+                      <td className="p-2">{w.completeDays}</td>
+                      <td className="p-2">{w.partialDays}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -665,25 +869,25 @@ export default function AttendancePage() {
                 <thead className="text-xs text-muted-foreground border-b border-border">
                   <tr>
                     <th className="text-left p-2">Student</th>
-                    <th className="text-left p-2">Required</th>
-                    <th className="text-left p-2">Completed</th>
-                    <th className="text-left p-2">Late</th>
+                    <th className="text-left p-2">Days in month</th>
+                    <th className="text-left p-2">Complete</th>
+                    <th className="text-left p-2">Complete (late)</th>
+                    <th className="text-left p-2">Partial</th>
                     <th className="text-left p-2">Missing</th>
-                    <th className="text-left p-2">Excused</th>
-                    <th className="text-left p-2">Manual</th>
-                    <th className="text-left p-2">Completion %</th>
+                    <th className="text-left p-2">Exportable days</th>
+                    <th className="text-left p-2">Complete %</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {monthSummary.map((m) => (
                     <tr key={m.student.id}>
                       <td className="p-2">{m.student.preferred_name || m.student.full_name}</td>
-                      <td className="p-2">{m.requiredTotal}</td>
-                      <td className="p-2">{m.completed}</td>
-                      <td className="p-2">{m.late}</td>
-                      <td className="p-2">{m.missingCount}</td>
-                      <td className="p-2">{m.excused}</td>
-                      <td className="p-2">{m.manualCount}</td>
+                      <td className="p-2">{m.daysInMonth}</td>
+                      <td className="p-2">{m.complete}</td>
+                      <td className="p-2">{m.completeLate}</td>
+                      <td className="p-2">{m.partial}</td>
+                      <td className="p-2">{m.missing}</td>
+                      <td className="p-2">{m.exportableDays}</td>
                       <td className="p-2">{m.pct}%</td>
                     </tr>
                   ))}
@@ -699,9 +903,34 @@ export default function AttendancePage() {
                   <AlertTriangle className="h-4 w-4" />
                   <p className="text-sm">{rosterWarning}</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => setTab("roster")}>Import roster</Button>
+                <Button size="sm" variant="outline" onClick={() => setTab("roster")}>Open roster</Button>
               </div>
             )}
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-sm font-semibold mb-2">Partial or missing day (today)</p>
+              <ul className="space-y-1 text-sm">
+                {needsAttention.partialToday.slice(0, 20).map((p, i) => (
+                  <li key={`${p.userId}-${i}`} className="flex items-center justify-between gap-2">
+                    <span>{p.name}</span>
+                    <div className="flex items-center gap-2">
+                      {statusBadge(p.status)}
+                      <Button size="sm" variant="outline" onClick={() => { setTab("manual"); setDailyOverride((d) => ({ ...d, userId: p.userId, status: "completed" })) }}>Add correction</Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-sm font-semibold mb-2">Not exportable today</p>
+              <ul className="space-y-1 text-sm">
+                {needsAttention.notExportable.slice(0, 15).map((p, i) => (
+                  <li key={`${p.userId}-ne-${i}`} className="flex items-center justify-between">
+                    <span>{p.name}</span>
+                    {statusBadge(p.status)}
+                  </li>
+                ))}
+              </ul>
+            </div>
             <div className="rounded-lg border border-border bg-card p-4">
               <p className="text-sm font-semibold mb-2">Missing checkpoint today</p>
               <ul className="space-y-1 text-sm">
@@ -714,12 +943,23 @@ export default function AttendancePage() {
               </ul>
             </div>
             <div className="rounded-lg border border-border bg-card p-4">
-              <p className="text-sm font-semibold mb-2">Late today</p>
+              <p className="text-sm font-semibold mb-2">Late checkpoint today</p>
               <ul className="space-y-1 text-sm">
                 {needsAttention.lateToday.slice(0, 15).map((r, i) => (
                   <li key={`${r.user_id}-${i}`} className="flex items-center justify-between">
                     <span>{r.display_name || r.username || r.user_id}</span>
                     <Badge className="bg-warning text-warning-foreground">{r.checkpoint_label || r.checkpoint_key}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-sm font-semibold mb-2">Partial days this week</p>
+              <ul className="space-y-1 text-sm">
+                {needsAttention.incompleteWeek.slice(0, 12).map((w) => (
+                  <li key={w.student.id} className="flex items-center justify-between">
+                    <span>{w.student.preferred_name || w.student.full_name}</span>
+                    <Badge variant="secondary">{w.partialDays} partial</Badge>
                   </li>
                 ))}
               </ul>
@@ -734,6 +974,136 @@ export default function AttendancePage() {
                   <p className="text-xs text-muted-foreground">{students.length} students</p>
                 </div>
                 <div className="flex gap-2">
+                  <Dialog open={syncDialogOpen} onOpenChange={(open) => { 
+                    setSyncDialogOpen(open); 
+                    if (!open) { 
+                      setSyncSummary(null); 
+                      setSyncError(null); 
+                      setMirrorAcknowledged(false); 
+                      setShowAdvancedSync(false); 
+                      setSyncMode("append") 
+                    } else {
+                      void fetchRoles()
+                    }
+                  }}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setSyncCohortId(selectedCohortId === "all" ? "" : selectedCohortId); setSyncSummary(null); setSyncError(null); setSyncMode("append"); setMirrorAcknowledged(false); setShowAdvancedSync(false); void fetchRoles(); }}>
+                        <Cloud className="h-3.5 w-3.5" />
+                        Sync from Discord
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Sync students from Discord</DialogTitle>
+                      </DialogHeader>
+                      <p className="text-sm text-muted-foreground">
+                        Select the Discord role assigned to students. Only members with this role will be added to the roster.
+                      </p>
+                      <div className="space-y-3 pt-2">
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Student role</label>
+                          {syncRolesLoading ? (
+                            <div className="text-sm text-muted-foreground h-9 flex items-center border border-border rounded-md px-3 bg-muted/30">Loading roles...</div>
+                          ) : syncRoles.length === 0 ? (
+                            <div className="text-sm text-destructive h-9 flex items-center border border-destructive/30 rounded-md px-3 bg-destructive/10">Could not load Discord roles. Make sure the bot can view this server.</div>
+                          ) : (
+                            <Select value={syncSelectedRoleId || "none"} onValueChange={(v) => {
+                              const val = v === "none" ? null : v;
+                              setSyncSelectedRoleId(val);
+                              if (val) localStorage.setItem(`syncRole_${selectedGuildId}`, val);
+                              else localStorage.removeItem(`syncRole_${selectedGuildId}`);
+                            }}>
+                              <SelectTrigger><SelectValue placeholder="Choose the Discord role that represents students" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none" disabled>Choose the Discord role that represents students...</SelectItem>
+                                {syncRoles.map((r) => (
+                                  <SelectItem key={r.id} value={r.id}>
+                                    <div className="flex items-center gap-2 w-full justify-between pr-4">
+                                      <span className="flex items-center gap-2">
+                                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: r.color && r.color !== '#000000' ? r.color : '#99aab5' }} />
+                                        {r.name}
+                                      </span>
+                                      {r.memberCount > 0 && <span className="text-xs text-muted-foreground tabular-nums">{r.memberCount} members</span>}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Cohort</label>
+                          <Select value={syncCohortId || "default"} onValueChange={(v) => setSyncCohortId(v === "default" ? "" : v)}>
+                            <SelectTrigger><SelectValue placeholder="Active/default cohort" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="default">Active / default cohort</SelectItem>
+                              {cohorts.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Sync mode</label>
+                          <div className="rounded-md border border-border p-3 space-y-2">
+                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input type="radio" name="syncMode" checked={syncMode === "append"} onChange={() => setSyncMode("append")} />
+                              <span><strong>Append / update only</strong> <span className="text-muted-foreground">(recommended)</span></span>
+                            </label>
+                            <p className="text-xs text-muted-foreground pl-6">Creates new students and updates existing ones. Never deactivates anyone.</p>
+                            {!showAdvancedSync ? (
+                              <button type="button" className="text-xs text-muted-foreground underline pl-0 mt-1" onClick={() => setShowAdvancedSync(true)}>Show advanced options…</button>
+                            ) : (
+                              <>
+                                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                  <input type="radio" name="syncMode" checked={syncMode === "mirror"} onChange={() => setSyncMode("mirror")} />
+                                  <span><strong>Mirror Student role</strong> <Badge variant="destructive" className="ml-1 text-[10px]">Advanced</Badge></span>
+                                </label>
+                                <p className="text-xs text-muted-foreground pl-6">Creates/updates Student role members <strong>and deactivates</strong> roster students who no longer have the Student role.</p>
+                                {syncMode === "mirror" && (
+                                  <label className="flex items-start gap-2 text-xs bg-destructive/10 border border-destructive/30 rounded-md p-2 ml-6 cursor-pointer">
+                                    <input type="checkbox" checked={mirrorAcknowledged} onChange={(e) => setMirrorAcknowledged(e.target.checked)} className="mt-0.5" />
+                                    <span>I understand this may deactivate roster students who no longer have the Student role.</span>
+                                  </label>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {syncSummary && (
+                        <div className="rounded-md border border-border bg-muted/30 p-3 text-sm space-y-1 mt-2">
+                          <p className="font-semibold text-foreground">Sync complete</p>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
+                            <span className="text-muted-foreground">Scanned members</span><span>{syncSummary.scannedMembers}</span>
+                            <span className="text-muted-foreground">Matched Student role</span><span>{syncSummary.matchedStudentRole}</span>
+                            <span className="text-muted-foreground">Created</span><span className="text-emerald-600 font-medium">{syncSummary.created}</span>
+                            <span className="text-muted-foreground">Updated</span><span>{syncSummary.updated}</span>
+                            <span className="text-muted-foreground">Linked to cohort</span><span>{syncSummary.linked}</span>
+                            {syncSummary.deactivated > 0 && (<><span className="text-muted-foreground">Deactivated</span><span className="text-destructive font-medium">{syncSummary.deactivated}</span></>)}
+                            <span className="text-muted-foreground">Skipped (bots)</span><span>{syncSummary.skippedBots}</span>
+                            <span className="text-muted-foreground">Skipped (no Student role)</span><span>{syncSummary.skippedNoStudentRole}</span>
+                          </div>
+                          {syncSummary.warnings.length > 0 && (
+                            <div className="mt-1 text-xs text-amber-600">{syncSummary.warnings.join(" ")}</div>
+                          )}
+                          {syncSummary.errors.length > 0 && (
+                            <div className="mt-1 text-xs text-destructive">{syncSummary.errors.length} error(s)</div>
+                          )}
+                        </div>
+                      )}
+                      {syncError && (
+                        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm mt-2 flex gap-2 text-destructive items-start">
+                          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                          <p>{syncError}</p>
+                        </div>
+                      )}
+                      <div className="flex justify-end gap-2 pt-2">
+                        <Button variant="outline" size="sm" onClick={() => setSyncDialogOpen(false)}>Cancel</Button>
+                        <Button size="sm" disabled={syncing || (syncMode === "mirror" && !mirrorAcknowledged) || !syncSelectedRoleId} onClick={() => void runDiscordSync()}>
+                          {syncing ? "Syncing…" : "Sync now"}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                   <Button variant="outline" size="sm" onClick={() => void exportRosterCsv()}>Export roster CSV</Button>
                   <Dialog open={studentDialogOpen} onOpenChange={setStudentDialogOpen}>
                     <DialogTrigger asChild>
@@ -778,7 +1148,7 @@ export default function AttendancePage() {
                 </Select>
               </div>
               <div className="rounded-md border border-border overflow-x-auto">
-                <table className="w-full min-w-[950px] text-sm">
+                <table className="w-full min-w-[1050px] text-sm">
                   <thead className="text-xs text-muted-foreground border-b border-border">
                     <tr>
                       <th className="text-left p-2">Full Name</th>
@@ -786,166 +1156,95 @@ export default function AttendancePage() {
                       <th className="text-left p-2">Discord Username</th>
                       <th className="text-left p-2">Discord User ID</th>
                       <th className="text-left p-2">Duty Station</th>
-                      <th className="text-left p-2">Student Code</th>
+                      <th className="text-left p-2">Source</th>
                       <th className="text-left p-2">Active</th>
                       <th className="text-left p-2">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {students.map((s) => (
+                    {students.map((s) => {
+                      const src = s.source || "manual"
+                      const srcLabel = src === "discord_sync" ? "Discord Sync" : src === "discord_checkin_auto" ? "Auto Check-in" : "Manual"
+                      const srcVariant = src === "discord_sync" ? "default" : src === "discord_checkin_auto" ? "secondary" : "outline"
+                      return (
                       <tr key={s.id}>
                         <td className="p-2">{s.full_name}</td>
                         <td className="p-2">{s.preferred_name || "—"}</td>
                         <td className="p-2">{s.discord_username || "—"}</td>
                         <td className="p-2 font-mono text-xs">{s.discord_user_id || "—"}</td>
                         <td className="p-2">{s.duty_station || "Remote"}</td>
-                        <td className="p-2">{s.student_code || "—"}</td>
+                        <td className="p-2">
+                          <div className="flex flex-col gap-0.5">
+                            <Badge variant={srcVariant as any} className="text-[10px] w-fit">{srcLabel}</Badge>
+                            {s.last_synced_at && <span className="text-[10px] text-muted-foreground">{formatDateShort(s.last_synced_at)}</span>}
+                          </div>
+                        </td>
                         <td className="p-2">{s.active ? <Badge>Active</Badge> : <Badge variant="secondary">Inactive</Badge>}</td>
                         <td className="p-2">
-                          <Button variant="ghost" size="sm" onClick={() => {
-                            setEditingStudentId(s.id)
-                            setStudentForm({
-                              fullName: s.full_name || "",
-                              preferredName: s.preferred_name || "",
-                              email: s.email || "",
-                              discordUserId: s.discord_user_id || "",
-                              discordUsername: s.discord_username || "",
-                              dutyStation: s.duty_station || "Remote",
-                              studentCode: s.student_code || "",
-                              cohortId: selectedCohortId === "all" ? "" : selectedCohortId,
-                              active: Boolean(s.active),
-                            })
-                            setStudentDialogOpen(true)
-                          }}>Edit</Button>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => {
+                              setEditingStudentId(s.id)
+                              setStudentForm({
+                                fullName: s.full_name || "",
+                                preferredName: s.preferred_name || "",
+                                email: s.email || "",
+                                discordUserId: s.discord_user_id || "",
+                                discordUsername: s.discord_username || "",
+                                dutyStation: s.duty_station || "Remote",
+                                studentCode: s.student_code || "",
+                                cohortId: selectedCohortId === "all" ? "" : selectedCohortId,
+                                active: Boolean(s.active),
+                              })
+                              setStudentDialogOpen(true)
+                            }}>Edit</Button>
+                            {s.active ? (
+                              <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void toggleStudentActive(s.id, false)}>Deactivate</Button>
+                            ) : (
+                              <Button variant="ghost" size="sm" className="text-emerald-600" onClick={() => void toggleStudentActive(s.id, true)}>Reactivate</Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
           </TabsContent>
 
-          <TabsContent value="settings" className="space-y-3">
-            <div className="rounded-lg border border-border bg-card p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold">Checkpoint definitions</p>
-                <Button size="sm" onClick={() => void addCheckpoint()}>Add checkpoint</Button>
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Late submissions are still saved and marked Late unless you disable late submissions.
-              </p>
-              <div className="mt-4 space-y-3">
-                {defs.map((d) => (
-                  <CheckpointEditor key={d.id} def={d} onSave={saveCheckpoint} />
-                ))}
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="import-export" className="space-y-3">
-            <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-              <p className="text-sm font-semibold">Roster CSV import with mapping</p>
-              <p className="text-xs text-muted-foreground">
-                Upload roster CSV, map columns, preview, then commit.
-              </p>
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0]
-                  if (!file) return
-                  const text = await file.text()
-                  setCsvText(text)
-                  const parsed = Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: true })
-                  const headers = parsed.meta.fields || []
-                  setCsvHeaders(headers)
-                  setCsvPreview((parsed.data || []).slice(0, 10))
-                  const map: Record<string, string> = {}
-                  headers.forEach((h: string) => {
-                    const key = h.toLowerCase()
-                    if (key.includes("full") && key.includes("name")) map.fullName = h
-                    if (key.includes("preferred")) map.preferredName = h
-                    if (key === "email" || key.includes("email")) map.email = h
-                    if (key.includes("discord") && key.includes("id")) map.discordUserId = h
-                    if (key.includes("discord") && key.includes("username")) map.discordUsername = h
-                    if (key.includes("duty") || key.includes("station")) map.dutyStation = h
-                    if (key.includes("student") && key.includes("code")) map.studentCode = h
-                    if (key.includes("cohort") || key.includes("course")) map.cohort = h
-                  })
-                  setColumnMap(map)
-                }}
-              />
-              {csvHeaders.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {ROSTER_FIELDS.map((field) => (
-                    <div key={field} className="space-y-1">
-                      <label className="text-xs text-muted-foreground">{FIELD_LABELS[field]}</label>
-                      <Select value={columnMap[field] || "unmapped"} onValueChange={(v) => setColumnMap((m) => ({ ...m, [field]: v === "unmapped" ? "" : v }))}>
-                        <SelectTrigger><SelectValue placeholder="Map column" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unmapped">Unmapped</SelectItem>
-                          {csvHeaders.map((h) => <SelectItem key={`${field}-${h}`} value={h}>{h}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <textarea
-                className="w-full min-h-40 rounded-md border border-border bg-background p-3 text-xs font-mono"
-                placeholder="Full Name,Preferred Name,Email,Discord User ID,Discord Username,Duty Station,Student Code,Cohort"
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-              />
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void previewImport()}>
-                  <Upload className="h-3.5 w-3.5" /> Preview
-                </Button>
-                <Button size="sm" onClick={() => void commitRosterImport()}>Commit import</Button>
-              </div>
-              {csvPreview.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium mb-1">Preview rows (first 10)</p>
-                  <div className="rounded border border-border p-2 text-xs max-h-40 overflow-auto">
-                    {csvPreview.map((r, i) => (
-                      <pre key={i} className="whitespace-pre-wrap">{JSON.stringify(r, null, 0)}</pre>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {rosterImportResult && (
-                <ul className="space-y-1 text-xs">
-                  <li>Total: {rosterImportResult.rowsTotal ?? 0}</li>
-                  <li>Imported: {rosterImportResult.rowsImported ?? 0}</li>
-                  <li>Updated: {rosterImportResult.rowsUpdated ?? 0}</li>
-                  <li>Skipped: {rosterImportResult.rowsSkipped ?? 0}</li>
-                  <li>Failed: {rosterImportResult.rowsFailed ?? 0}</li>
-                </ul>
-              )}
-            </div>
-          </TabsContent>
-
           <TabsContent value="manual" className="space-y-3">
-            <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-              <p className="text-sm font-semibold">Manual correction</p>
+            {manualTabNotice ? (
+              <div
+                className={cn(
+                  "rounded-md border px-3 py-2 text-sm",
+                  manualTabNotice.kind === "ok"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                    : "border-destructive/40 bg-destructive/10 text-destructive"
+                )}
+              >
+                {manualTabNotice.text}
+              </div>
+            ) : null}
+            <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+              <p className="text-sm font-semibold">Checkpoint correction</p>
+              <p className="text-xs text-muted-foreground">Sets or updates a single checkpoint row for a student and date.</p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <Select value={manual.userId || "none"} onValueChange={(v) => setManual((m) => ({ ...m, userId: v === "none" ? "" : v }))}>
-                  <SelectTrigger><SelectValue placeholder="Select Student" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Select student</SelectItem>
-                    {students.map((s) => {
-                      const userId = s.discord_user_id || `student:${s.id}`
-                      return <SelectItem key={userId} value={userId}>{s.preferred_name || s.full_name}</SelectItem>
-                    })}
-                  </SelectContent>
-                </Select>
+                <ManualStudentCombobox
+                  students={students}
+                  valueId={manualStudentId}
+                  onValueIdChange={(id) => setManualStudentId(id)}
+                  disabled={!selectedGuildId}
+                  placeholder="Select student…"
+                />
                 <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
                 <Select value={manual.checkpointKey || "none"} onValueChange={(v) => setManual((m) => ({ ...m, checkpointKey: v === "none" ? "" : v }))}>
                   <SelectTrigger><SelectValue placeholder="Checkpoint" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Select checkpoint</SelectItem>
-                    {defs.map((d) => <SelectItem key={d.key} value={d.key}>{d.label}</SelectItem>)}
+                    {activeDefs.map((d) => (
+                      <SelectItem key={d.key} value={d.key}>{d.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={manual.status} onValueChange={(v) => setManual((m) => ({ ...m, status: v }))}>
@@ -956,11 +1255,106 @@ export default function AttendancePage() {
                     <SelectItem value="excused">excused</SelectItem>
                     <SelectItem value="missing">missing</SelectItem>
                     <SelectItem value="manual">manual</SelectItem>
+                    <SelectItem value="completed">completed</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              <Input placeholder="Signature / confirmation text" value={manual.signatureText} onChange={(e) => setManual((m) => ({ ...m, signatureText: e.target.value }))} />
               <Input placeholder="Notes / reason" value={manual.notes} onChange={(e) => setManual((m) => ({ ...m, notes: e.target.value }))} />
-              <Button size="sm" onClick={() => void saveManual()}>Save correction</Button>
+              <Button size="sm" onClick={() => void saveManual()}>Save checkpoint correction</Button>
+            </div>
+
+            <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+              <p className="text-sm font-semibold">Daily override</p>
+              <p className="text-xs text-muted-foreground">
+                Use when a student forgot a checkpoint but the day should still count for the official sheet. This does not delete raw checkpoint events.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <ManualStudentCombobox
+                  students={students}
+                  valueId={dailyOverrideStudentId}
+                  onValueIdChange={(id) => setDailyOverrideStudentId(id)}
+                  disabled={!selectedGuildId}
+                  placeholder="Select student…"
+                />
+                <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                <Select value={dailyOverride.status} onValueChange={(v) => setDailyOverride((d) => ({ ...d, status: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Daily status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="completed">completed</SelectItem>
+                    <SelectItem value="manual">manual</SelectItem>
+                    <SelectItem value="present">present</SelectItem>
+                    <SelectItem value="late">late</SelectItem>
+                    <SelectItem value="excused">excused</SelectItem>
+                    <SelectItem value="missing">missing</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Input placeholder="Signature text for sheet" value={dailyOverride.signatureText} onChange={(e) => setDailyOverride((d) => ({ ...d, signatureText: e.target.value }))} />
+              <Input placeholder="Notes / reason" value={dailyOverride.notes} onChange={(e) => setDailyOverride((d) => ({ ...d, notes: e.target.value }))} />
+              <Button size="sm" variant="secondary" onClick={() => void saveDailyOverride()}>Save daily override</Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="official" className="space-y-3">
+            {selectedGuildId ? (
+              <OfficialSheetsPanel
+                guildId={selectedGuildId}
+                cohorts={cohorts}
+                selectedCohortId={selectedCohortId}
+                onCohortChange={setSelectedCohortId}
+                refreshNonce={officialSheetsRefreshNonce}
+              />
+            ) : null}
+          </TabsContent>
+
+          <TabsContent value="settings" className="space-y-3">
+            <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">Checkpoint schedule</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Changing a checkpoint key after creation is risky; labels and times are safe to edit. Delete with records deactivates instead of removing history.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={async () => {
+                    if (!selectedGuildId) return
+                    const res = await apiFetch("/api/attendance/settings/restore-defaults", { method: "POST", body: JSON.stringify({ guildId: selectedGuildId }) })
+                    if (!res.ok) setError(res.error ?? "Restore failed")
+                    await load(true)
+                  }}>Restore default checkpoints</Button>
+                  <Button size="sm" onClick={() => void addCheckpoint()}>Add checkpoint</Button>
+                </div>
+              </div>
+              <div className="mt-4 space-y-3">
+                {allDefs.map((d) => (
+                  <CheckpointEditor
+                    key={d.id}
+                    def={d}
+                    onSave={saveCheckpoint}
+                    onDeactivate={async (id) => {
+                      if (!selectedGuildId) return
+                      const res = await apiFetch(`/api/attendance/settings/checkpoints/${id}/deactivate`, {
+                        method: "POST",
+                        body: JSON.stringify({ guildId: selectedGuildId }),
+                      })
+                      if (!res.ok) setError(res.error ?? "Deactivate failed")
+                      await load(true)
+                    }}
+                    onMove={async (orderedIds) => {
+                      if (!selectedGuildId) return
+                      const res = await apiFetch("/api/attendance/settings/checkpoints/reorder", {
+                        method: "POST",
+                        body: JSON.stringify({ guildId: selectedGuildId, orderedIds }),
+                      })
+                      if (!res.ok) setError(res.error ?? "Reorder failed")
+                      await load(true)
+                    }}
+                    allDefs={allDefs}
+                  />
+                ))}
+              </div>
             </div>
           </TabsContent>
           </Tabs>
@@ -972,27 +1366,100 @@ export default function AttendancePage() {
 function CheckpointEditor({
   def,
   onSave,
+  onDeactivate,
+  onMove,
+  allDefs,
 }: {
   def: CheckpointDef
   onSave: (d: CheckpointDef) => Promise<void>
+  onDeactivate: (id: number) => Promise<void>
+  onMove: (orderedIds: number[]) => Promise<void>
+  allDefs: CheckpointDef[]
 }) {
   const [local, setLocal] = useState(def)
   useEffect(() => setLocal(def), [def])
 
+  const move = (dir: -1 | 1) => {
+    const sorted = [...allDefs].sort((a, b) => a.sortOrder - b.sortOrder)
+    const idx = sorted.findIndex((x) => x.id === def.id)
+    const j = idx + dir
+    if (idx < 0 || j < 0 || j >= sorted.length) return
+    const next = [...sorted]
+    const t = next[idx]
+    next[idx] = next[j]
+    next[j] = t
+    void onMove(next.map((d) => d.id))
+  }
+
   return (
-    <div className="rounded-md border border-border bg-background p-3 space-y-2">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-        <Input value={local.label} onChange={(e) => setLocal({ ...local, label: e.target.value })} />
-        <Input value={local.targetTime} onChange={(e) => setLocal({ ...local, targetTime: e.target.value })} />
-        <Input value={String(local.opensBeforeMinutes)} onChange={(e) => setLocal({ ...local, opensBeforeMinutes: Number(e.target.value) || 0 })} />
-        <Input value={String(local.lateAfterMinutes)} onChange={(e) => setLocal({ ...local, lateAfterMinutes: Number(e.target.value) || 0 })} />
+    <div className="rounded-md border border-border bg-background p-3 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-mono text-muted-foreground">key: {local.key}</p>
+        <div className="flex gap-1">
+          <Button type="button" size="sm" variant="outline" onClick={() => move(-1)}>Up</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => move(1)}>Down</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => void onDeactivate(local.id)}>Deactivate</Button>
+        </div>
       </div>
-      <div className="flex flex-wrap gap-2 items-center">
-        <label className="text-xs"><input type="checkbox" checked={local.allowLateSubmission} onChange={(e) => setLocal({ ...local, allowLateSubmission: e.target.checked })} /> allow late</label>
-        <label className="text-xs"><input type="checkbox" checked={local.required} onChange={(e) => setLocal({ ...local, required: e.target.checked })} /> required</label>
-        <label className="text-xs"><input type="checkbox" checked={local.active} onChange={(e) => setLocal({ ...local, active: e.target.checked })} /> active</label>
-        <Button size="sm" variant="outline" onClick={() => void onSave(local)}>Save</Button>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Label</label>
+          <Input value={local.label} onChange={(e) => setLocal({ ...local, label: e.target.value })} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Command type</label>
+          <Select value={local.commandType} onValueChange={(v) => setLocal({ ...local, commandType: v as "checkin" | "checkout" })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="checkin">checkin</SelectItem>
+              <SelectItem value="checkout">checkout</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Target time (HH:mm)</label>
+          <Input value={local.targetTime} onChange={(e) => setLocal({ ...local, targetTime: e.target.value })} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Opens before (min)</label>
+          <Input value={String(local.opensBeforeMinutes)} onChange={(e) => setLocal({ ...local, opensBeforeMinutes: Number(e.target.value) || 0 })} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Late after (min)</label>
+          <Input value={String(local.lateAfterMinutes)} onChange={(e) => setLocal({ ...local, lateAfterMinutes: Number(e.target.value) || 0 })} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Closes after (min, empty = end of day)</label>
+          <Input
+            value={local.closesAfterMinutes == null ? "" : String(local.closesAfterMinutes)}
+            onChange={(e) =>
+              setLocal({
+                ...local,
+                closesAfterMinutes: e.target.value === "" ? null : Number(e.target.value),
+              })
+            }
+          />
+        </div>
       </div>
+      <div className="flex flex-wrap gap-4 items-center text-xs">
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={local.allowLateSubmission} onChange={(e) => setLocal({ ...local, allowLateSubmission: e.target.checked })} />
+          Accept late submissions
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={local.required} onChange={(e) => setLocal({ ...local, required: e.target.checked })} />
+          Required for daily completion
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={local.includeInOfficialCompletion !== false} onChange={(e) => setLocal({ ...local, includeInOfficialCompletion: e.target.checked })} />
+          Include in official completion
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={local.active} onChange={(e) => setLocal({ ...local, active: e.target.checked })} />
+          Active
+        </label>
+      </div>
+      <Button size="sm" variant="outline" onClick={() => void onSave(local)}>Save checkpoint</Button>
     </div>
   )
 }

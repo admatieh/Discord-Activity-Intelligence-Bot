@@ -3,6 +3,7 @@ const logger = require('../utils/logger')
 const activityEventModel = require('../modules/activity/activityEventModel')
 const attendanceSettingsService = require('./attendanceSettingsService')
 const rosterService = require('./rosterService')
+const attendanceDailyStatusService = require('./attendanceDailyStatusService')
 
 function parseHHmm(str) {
   const m = /^(\d{2}):(\d{2})$/.exec(String(str || '').trim())
@@ -301,7 +302,7 @@ function recordCheckpoint({
   }
 }
 
-function getTodayAttendance({ guildId, date }) {
+function getTodayAttendance({ guildId, date, cohortId = null }) {
   if (!guildId) return { ok: false, error: 'guildId is required.' }
   const tz = (attendanceSettingsService.getCheckpointDefinitions(guildId).definitions?.[0]?.timezone) || 'Asia/Beirut'
   const attendanceDate = date || getZonedParts(new Date(), tz).dateString
@@ -315,7 +316,22 @@ function getTodayAttendance({ guildId, date }) {
     )
     .all(guildId, attendanceDate)
 
-  return { ok: true, attendanceDate, rows }
+  const cid = cohortId != null && Number.isFinite(Number(cohortId)) ? Number(cohortId) : null
+  const summary = attendanceDailyStatusService.getRangeDailySummary({
+    guildId,
+    startDate: attendanceDate,
+    endDate: attendanceDate,
+    cohortId: cid,
+  })
+
+  return {
+    ok: true,
+    attendanceDate,
+    rows,
+    dailyByUser: summary.byUser,
+    rosterConfigured: summary.rosterConfigured,
+    rosterWarning: summary.warning,
+  }
 }
 
 function getWeeklyAttendance({ guildId, weekStart, weekEnd }) {
@@ -428,6 +444,7 @@ function getMissingCheckpoints({ guildId, date, users }) {
 function upsertManualAttendance({
   guildId,
   userId,
+  studentId,
   date,
   checkpointKey,
   status,
@@ -436,9 +453,16 @@ function upsertManualAttendance({
   displayName,
   username,
   dutyStation,
+  signatureText: signatureTextIn,
 }) {
-  if (!guildId || !userId || !date || !checkpointKey || !status) {
-    return { ok: false, error: 'guildId, userId, date, checkpointKey, and status are required.' }
+  let resolvedUserId = userId != null && String(userId).trim() !== '' ? String(userId).trim() : null
+  if (!resolvedUserId && studentId != null && Number.isFinite(Number(studentId))) {
+    const stu = rosterService.getStudentById({ guildId, studentId: Number(studentId) })
+    if (stu?.discord_user_id) resolvedUserId = String(stu.discord_user_id).trim()
+    else resolvedUserId = `student:${Number(studentId)}`
+  }
+  if (!resolvedUserId || !guildId || !date || !checkpointKey || !status) {
+    return { ok: false, error: 'guildId, userId or studentId, date, checkpointKey, and status are required.' }
   }
 
   const existing = db
@@ -446,12 +470,12 @@ function upsertManualAttendance({
       `SELECT * FROM attendance_checkpoints
        WHERE guild_id=? AND user_id=? AND attendance_date=? AND checkpoint_key=?`
     )
-    .get(guildId, userId, date, checkpointKey)
+    .get(guildId, resolvedUserId, date, checkpointKey)
 
   const cp = (attendanceSettingsService.getCheckpointDefinitions(guildId).definitions || []).find((c) => c.key === checkpointKey)
   const row = upsertCheckpointRow({
     guildId,
-    userId,
+    userId: resolvedUserId,
     username,
     displayName,
     dutyStation,
@@ -465,7 +489,7 @@ function upsertManualAttendance({
     discordMessageId: existing?.discord_message_id || null,
     channelId: existing?.channel_id || null,
     sessionId: existing?.session_id || null,
-    signatureText: existing?.signature_text || displayName || username || userId,
+    signatureText: signatureTextIn || existing?.signature_text || displayName || username || resolvedUserId,
     notes: reason || existing?.notes || null,
   })
 
@@ -478,7 +502,7 @@ function upsertManualAttendance({
     ).run(
       row?.id || null,
       guildId,
-      userId,
+      resolvedUserId,
       date,
       checkpointKey,
       existing?.status || null,
@@ -493,12 +517,13 @@ function upsertManualAttendance({
   try {
     activityEventModel.insertEvent({
       type: 'attendance_manual_override',
-      userId: changedBy || userId,
+      userId: changedBy || resolvedUserId,
       channelId: null,
       sessionId: null,
       metadata: {
         guildId,
-        targetUserId: userId,
+        targetUserId: resolvedUserId,
+        studentId: studentId != null ? Number(studentId) : null,
         date,
         checkpointKey,
         oldStatus: existing?.status || null,
@@ -534,6 +559,8 @@ function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', coh
     'Duty Station',
     'Date',
     'Day',
+    'Daily Status',
+    'Exportable Day',
     'Checkpoint Label',
     'Checkpoint Target Time',
     'Status',
@@ -542,6 +569,22 @@ function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', coh
     'Source',
     'Notes',
   ]
+
+  const dailyCache = new Map()
+  const dailyStatusFor = (userId, dt) => {
+    const k = `${userId}::${dt}`
+    if (!dailyCache.has(k)) {
+      dailyCache.set(
+        k,
+        attendanceDailyStatusService.getStudentDailyAttendanceStatus({
+          guildId,
+          studentId: userId,
+          date: dt,
+        })
+      )
+    }
+    return dailyCache.get(k)
+  }
 
   const escape = (s) => {
     const v = s == null ? '' : String(s)
@@ -603,6 +646,7 @@ function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', coh
   }
 
   for (const r of expandedRows) {
+    const ds = dailyStatusFor(r.user_id, r.attendance_date)
     lines.push(
       [
         courseName,
@@ -611,6 +655,8 @@ function exportAttendanceCsv({ guildId, startDate, endDate, courseName = '', coh
         r.duty_station || 'Remote',
         r.attendance_date,
         dayName(r.attendance_date),
+        ds.status,
+        ds.exportable ? 'yes' : 'no',
         r.checkpoint_label || r.checkpoint_key,
         keyToTarget.get(r.checkpoint_key) || '',
         r.status || '',
@@ -659,5 +705,10 @@ module.exports = {
   upsertManualAttendance,
   exportAttendanceCsv,
   getUserCheckpointRange,
+  getStudentDailyAttendanceStatus: attendanceDailyStatusService.getStudentDailyAttendanceStatus,
+  getOfficialAttendanceSheetRows: attendanceDailyStatusService.getOfficialAttendanceSheetRows,
+  exportOfficialAttendancePdf: attendanceDailyStatusService.exportOfficialAttendancePdf,
+  getRangeDailySummary: attendanceDailyStatusService.getRangeDailySummary,
+  upsertDailyOverride: attendanceDailyStatusService.upsertDailyOverride,
 }
 

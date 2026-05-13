@@ -12,8 +12,10 @@ const db = require('../database/db');
 const logger = require('../utils/logger');
 const sessionService = require('../modules/sessions/sessionService');
 const sessionModel = require('../models/sessionModel');
+const { eventBus, Events } = require('../core/eventBus');
 
 let _client = null;
+let _initialized = false;
 
 function setClient(discordClient) {
     _client = discordClient;
@@ -256,10 +258,59 @@ async function endSessionFromAction({ sessionId, voiceChannelId, requestedBy, re
             severity: 'info',
             metadata: { sessionId: sid, requestedBy, reason }
         });
+
+        // Check for auto-report option
+        let reportGenerated = false;
+        let reportId = null;
+        let reportError = null;
+
+        if (sid) {
+            const session = sessionModel.getSessionById(sid);
+            let options = {};
+            try {
+                if (session?.options_json) options = JSON.parse(session.options_json);
+            } catch {}
+
+            if (options.generateReport) {
+                try {
+                    // 1. Manually finalize attendance so the report has data
+                    const attendanceService = require('../modules/attendance/attendanceService');
+                    attendanceService.finalizeSessionAttendance(sid);
+
+                    // 2. Generate report
+                    const reportService = require('./reportService');
+                    const rptResult = await reportService.generateSessionReport(sid, {
+                        requestedBy: requestedBy || 'dashboard',
+                        skipIfExists: false // Force update since we just ended it
+                    });
+
+                    if (rptResult.ok) {
+                        reportGenerated = true;
+                        reportId = rptResult.report?.id;
+                    } else {
+                        reportError = rptResult.error;
+                    }
+                } catch (err) {
+                    reportError = err.message;
+                    logger.error(`[SessionAction] Manual auto-report failed: ${err.message}`);
+                }
+            }
+        }
+
+        return {
+            ok: true,
+            action,
+            message: result.message,
+            executionId: execId,
+            sessionId: sid,
+            reportGenerated,
+            reportId,
+            reportError
+        };
     }
 
     return {
-        ok: result.success,
+        ok: false,
         action,
         message: result.message,
         executionId: execId
@@ -358,8 +409,47 @@ function syncVoiceMembers({ guildId, voiceChannelId, sessionId }) {
     return { ok: true, members, memberCount: members.length };
 }
 
+function registerListeners() {
+    if (_initialized) return;
+    _initialized = true;
+
+    eventBus.on(Events.ATTENDANCE_FINALIZED, async ({ sessionId }) => {
+        try {
+            const session = sessionModel.getSessionById(sessionId);
+            if (!session) return;
+
+            let options = {};
+            try {
+                if (session.options_json) {
+                    options = JSON.parse(session.options_json);
+                }
+            } catch (err) {
+                logger.warn(`[SessionAction] Failed to parse options for session #${sessionId}: ${err.message}`);
+            }
+
+            if (options.generateReport) {
+                logger.log(`[SessionAction] Auto-generating report for session #${sessionId} (generateReport option enabled).`);
+                const reportService = require('./reportService');
+                const result = await reportService.generateSessionReport(sessionId, {
+                    requestedBy: 'system_auto',
+                    skipIfExists: true
+                });
+
+                if (result.ok && !result.skipped) {
+                    logger.log(`[SessionAction] Auto-report generated for session #${sessionId}.`);
+                }
+            }
+        } catch (error) {
+            logger.error(`[SessionAction] Auto-report listener error for session #${sessionId}: ${error.message}`);
+        }
+    });
+
+    logger.log('[SessionAction] Listeners registered.');
+}
+
 module.exports = {
     setClient,
+    registerListeners,
     startSessionFromAction,
     endSessionFromAction,
     generateReportFromAction,

@@ -36,6 +36,15 @@ function sendJson(res, status, payload) {
     res.end(JSON.stringify(payload));
 }
 
+function sendPdf(res, status, buffer, filename) {
+    res.writeHead(status, {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '')}"`,
+        'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+}
+
 function matchPath(pathname, pattern) {
     const patternParts = pattern.split('/');
     const pathParts = pathname.split('/');
@@ -196,7 +205,41 @@ function startApiServer(client) {
                 const body = await readBody(req).catch(() => ({}));
                 const guildId = body.guildId || query.guildId;
                 const changedBy = body.changedBy || query.changedBy || 'dashboard';
-                const result = attendanceSettingsService.deleteCheckpointDefinition(guildId, Number(attendanceParams.id), changedBy);
+                const force = String(query.force || body.force || '') === 'true';
+                const result = attendanceSettingsService.deleteCheckpointDefinition(guildId, Number(attendanceParams.id), changedBy, { force });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            attendanceParams = matchPath(pathname, '/api/attendance/settings/checkpoints/:id/deactivate');
+            if (attendanceParams && method === 'POST') {
+                const attendanceSettingsService = require('../services/attendanceSettingsService');
+                const body = await readBody(req).catch(() => ({}));
+                const guildId = body.guildId || query.guildId;
+                const changedBy = body.changedBy || query.changedBy || 'dashboard';
+                const result = attendanceSettingsService.deactivateCheckpointDefinition(guildId, Number(attendanceParams.id), changedBy);
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/settings/checkpoints/reorder' && method === 'POST') {
+                const attendanceSettingsService = require('../services/attendanceSettingsService');
+                const body = await readBody(req);
+                const result = attendanceSettingsService.reorderCheckpointDefinitions(
+                    body.guildId || query.guildId,
+                    body.orderedIds || body.ids || [],
+                    body.changedBy || 'dashboard'
+                );
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/settings/restore-defaults' && method === 'POST') {
+                const attendanceSettingsService = require('../services/attendanceSettingsService');
+                const body = await readBody(req).catch(() => ({}));
+                const guildId = body.guildId || query.guildId;
+                if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
+                const result = attendanceSettingsService.restoreDefaultCheckpointDefinitions(
+                    guildId,
+                    body.changedBy || 'dashboard'
+                );
                 return sendJson(res, result.ok ? 200 : 400, result);
             }
 
@@ -219,7 +262,8 @@ function startApiServer(client) {
                 const body = await readBody(req).catch(() => ({}));
                 const guildId = body.guildId || query.guildId;
                 const changedBy = body.changedBy || query.changedBy || 'dashboard';
-                const result = attendanceSettingsService.deleteCheckpointDefinition(guildId, Number(attendanceParams.id), changedBy);
+                const force = String(query.force || body.force || '') === 'true';
+                const result = attendanceSettingsService.deleteCheckpointDefinition(guildId, Number(attendanceParams.id), changedBy, { force });
                 return sendJson(res, result.ok ? 200 : 400, result);
             }
 
@@ -227,8 +271,13 @@ function startApiServer(client) {
                 const attendanceService = require('../services/attendanceCheckpointService');
                 const guildId = query.guildId;
                 const date = query.date || null;
+                const cohortIdRaw = query.cohortId;
+                const cohortId =
+                    cohortIdRaw != null && String(cohortIdRaw) !== '' && Number.isFinite(Number(cohortIdRaw))
+                        ? Number(cohortIdRaw)
+                        : null;
                 if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
-                const result = attendanceService.getTodayAttendance({ guildId, date });
+                const result = attendanceService.getTodayAttendance({ guildId, date, cohortId });
                 return sendJson(res, result.ok ? 200 : 400, result);
             }
 
@@ -269,12 +318,34 @@ function startApiServer(client) {
                 const attendanceService = require('../services/attendanceCheckpointService');
                 const body = await readBody(req);
                 const {
-                    guildId, userId, date, checkpointKey, status,
-                    reason, changedBy, displayName, username, dutyStation
+                    guildId,
+                    userId,
+                    studentId,
+                    date,
+                    checkpointKey,
+                    status,
+                    reason,
+                    notes,
+                    changedBy,
+                    displayName,
+                    username,
+                    dutyStation,
+                    signatureText,
                 } = body || {};
+                const sid = studentId != null && studentId !== '' ? Number(studentId) : null;
                 const result = attendanceService.upsertManualAttendance({
-                    guildId, userId, date, checkpointKey, status,
-                    reason, changedBy, displayName, username, dutyStation
+                    guildId,
+                    userId,
+                    studentId: Number.isFinite(sid) ? sid : null,
+                    date,
+                    checkpointKey,
+                    status,
+                    reason: reason ?? notes,
+                    changedBy,
+                    displayName,
+                    username,
+                    dutyStation,
+                    signatureText,
                 });
                 return sendJson(res, result.ok ? 200 : 400, result);
             }
@@ -312,6 +383,86 @@ function startApiServer(client) {
                 return sendJson(res, 200, result);
             }
 
+            if (pathname === '/api/attendance/export/pdf' && method === 'GET') {
+                const attendanceDaily = require('../services/attendanceDailyStatusService');
+                const guildId = query.guildId;
+                const month = query.month;
+                const year = query.year;
+                const courseName = query.courseName || '';
+                const cohortId = query.cohortId ? Number(query.cohortId) : null;
+                const dutyStationDefault = query.dutyStationDefault || 'Remote';
+                const includeIncomplete = String(query.includeIncomplete || '') === 'true';
+                const includeAllRosterStudents = String(query.includeAllRosterStudents || 'true') !== 'false';
+                if (!guildId || !month || !year) {
+                    return sendJson(res, 400, { ok: false, error: 'guildId, month, and year are required' });
+                }
+                const pdfRes = await attendanceDaily.exportOfficialAttendancePdf({
+                    guildId,
+                    cohortId,
+                    month: Number(month),
+                    year: Number(year),
+                    courseName,
+                    dutyStationDefault,
+                    includeIncomplete,
+                    includeAllRosterStudents,
+                });
+                if (!pdfRes.ok) return sendJson(res, 400, pdfRes);
+                return sendPdf(res, 200, pdfRes.buffer, pdfRes.filename || 'attendance.pdf');
+            }
+
+            if (pathname === '/api/attendance/official-sheet' && method === 'GET') {
+                const attendanceDaily = require('../services/attendanceDailyStatusService');
+                const guildId = query.guildId;
+                const month = query.month;
+                const year = query.year;
+                const cohortId = query.cohortId ? Number(query.cohortId) : null;
+                const dutyStationDefault = query.dutyStationDefault || 'Remote';
+                const includeIncomplete = String(query.includeIncomplete || '') === 'true';
+                const includeAllRosterStudents = String(query.includeAllRosterStudents || 'true') !== 'false';
+                if (!guildId || !month || !year) {
+                    return sendJson(res, 400, { ok: false, error: 'guildId, month, and year are required' });
+                }
+                const result = attendanceDaily.getOfficialAttendanceSheetRows({
+                    guildId,
+                    cohortId,
+                    month: Number(month),
+                    year: Number(year),
+                    dutyStationDefault,
+                    includeIncomplete,
+                    includeAllRosterStudents,
+                });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/attendance/summary-range' && method === 'GET') {
+                const attendanceDaily = require('../services/attendanceDailyStatusService');
+                const guildId = query.guildId;
+                const startDate = query.startDate;
+                const endDate = query.endDate;
+                const cohortId = query.cohortId ? Number(query.cohortId) : null;
+                if (!guildId || !startDate || !endDate) {
+                    return sendJson(res, 400, { ok: false, error: 'guildId, startDate, and endDate are required' });
+                }
+                const result = attendanceDaily.getRangeDailySummary({ guildId, startDate, endDate, cohortId });
+                return sendJson(res, 200, result);
+            }
+
+            if (pathname === '/api/attendance/daily-override' && method === 'POST') {
+                const attendanceDaily = require('../services/attendanceDailyStatusService');
+                const body = await readBody(req);
+                const result = attendanceDaily.upsertDailyOverride({
+                    guildId: body.guildId,
+                    userId: body.userId,
+                    attendanceDate: body.attendanceDate || body.date,
+                    status: body.status,
+                    signatureText: body.signatureText,
+                    notes: body.notes,
+                    changedBy: body.changedBy || 'dashboard',
+                    studentId: body.studentId != null ? Number(body.studentId) : null,
+                });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
             // ----------------------------------------------------------------
             // Roster / cohorts
             // ----------------------------------------------------------------
@@ -339,7 +490,12 @@ function startApiServer(client) {
                 const rosterService = require('../services/rosterService');
                 const guildId = query.guildId;
                 const cohortId = query.cohortId ? Number(query.cohortId) : null;
-                const active = query.active == null ? undefined : String(query.active) === 'true';
+                let active;
+                if (query.active != null && query.active !== '') {
+                    const s = String(query.active).toLowerCase();
+                    if (s === 'true' || s === '1' || s === 'yes') active = true;
+                    else if (s === 'false' || s === '0' || s === 'no') active = false;
+                }
                 if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
                 const students = rosterService.listStudents({ guildId, cohortId, active });
                 return sendJson(res, 200, { ok: true, students });
@@ -408,6 +564,26 @@ function startApiServer(client) {
                 const guildId = query.guildId;
                 const cohortId = query.cohortId ? Number(query.cohortId) : null;
                 const result = rosterService.exportRosterCsv({ guildId, cohortId });
+                return sendJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (pathname === '/api/roster/sync-discord' && method === 'POST') {
+                const rosterService = require('../services/rosterService');
+                const body = await readBody(req);
+                const { guildId, cohortId, mode, syncedBy, studentRoleId, studentRoleName } = body;
+                if (!guildId) return sendJson(res, 400, { ok: false, error: 'guildId is required' });
+                if (!client.isReady()) return sendJson(res, 503, { ok: false, error: 'Bot not ready. Cannot access Discord guild members.' });
+                const guild = client.guilds.cache.get(guildId);
+                if (!guild) return sendJson(res, 404, { ok: false, error: 'Guild not found. Make sure the bot is in the server.' });
+                const result = await rosterService.syncStudentsFromDiscordGuild({
+                    guild,
+                    guildId,
+                    cohortId: cohortId ? Number(cohortId) : null,
+                    syncedBy: syncedBy || 'dashboard',
+                    mode: mode === 'mirror' ? 'mirror' : 'append',
+                    studentRoleId: studentRoleId || null,
+                    studentRoleName: studentRoleName || null,
+                });
                 return sendJson(res, result.ok ? 200 : 400, result);
             }
 
@@ -522,6 +698,26 @@ function startApiServer(client) {
                     .filter(ch => ch.type === ChannelType.GuildText || ch.type === ChannelType.GuildAnnouncement)
                     .map(ch => ({ id: ch.id, name: ch.name, type: 'text', parentId: ch.parentId || null, parentName: ch.parent?.name || null }));
                 return sendJson(res, 200, { ok: true, guildId: params.guildId, channels });
+            }
+
+            params = matchPath(pathname, '/api/discord/guilds/:guildId/roles');
+            if (params && method === 'GET') {
+                const guild = client.guilds.cache.get(params.guildId);
+                if (!guild) return sendJson(res, 404, { ok: false, error: 'Guild not found' });
+                
+                const roles = guild.roles.cache
+                    .filter(r => r.id !== guild.id) // Exclude @everyone (role ID matches guild ID)
+                    .map(r => ({
+                        id: r.id,
+                        name: r.name,
+                        color: r.hexColor,
+                        position: r.position,
+                        managed: r.managed,
+                        memberCount: r.members?.size || 0
+                    }))
+                    .sort((a, b) => b.position - a.position);
+
+                return sendJson(res, 200, { ok: true, guildId: params.guildId, roles });
             }
 
             params = matchPath(pathname, '/api/discord/guilds/:guildId/members');

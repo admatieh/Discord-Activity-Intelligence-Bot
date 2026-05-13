@@ -43,6 +43,7 @@ client.once('ready', () => {
     // Wire Discord client into services
     messageService.setClient(client);
     sessionActionService.setClient(client);
+    sessionActionService.registerListeners();
 
     // Start scheduler (will execute due jobs on startup too)
     initScheduler(client);

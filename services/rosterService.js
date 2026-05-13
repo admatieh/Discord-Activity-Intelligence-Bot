@@ -1,5 +1,6 @@
 const db = require('../database/db')
 const { parse } = require('csv-parse/sync')
+const studentRoleConfig = require('../config/studentRoleConfig')
 
 const ROSTER_HEADER_ALIASES = {
   fullName: ['full name', 'full_name', 'name', 'student_name'],
@@ -78,6 +79,9 @@ function upsertStudent({
   dutyStation = 'Remote',
   studentCode = null,
   active = 1,
+  source = null,
+  syncedFromDiscord = null,
+  lastSyncedAt = null,
 }) {
   if (!guildId || !fullName) return { ok: false, error: 'guildId and fullName are required.' }
 
@@ -104,11 +108,17 @@ function upsertStudent({
     if (byName) existing = byName
   }
 
+  // Build source/sync update fragments
+  const srcVal = source ?? (existing?.source || 'manual')
+  const syncFlag = syncedFromDiscord != null ? (syncedFromDiscord ? 1 : 0) : (existing?.synced_from_discord ?? 0)
+  const syncTs = lastSyncedAt ?? existing?.last_synced_at ?? null
+
   if (existing) {
     db.prepare(
       `UPDATE students
        SET full_name=?, preferred_name=?, email=?, discord_user_id=?, discord_username=?,
-           duty_station=?, student_code=?, active=?, updated_at=datetime('now')
+           duty_station=?, student_code=?, active=?, source=?, synced_from_discord=?,
+           last_synced_at=?, updated_at=datetime('now')
        WHERE id=?`
     ).run(
       fullName,
@@ -119,6 +129,9 @@ function upsertStudent({
       dutyStation,
       studentCode,
       active ? 1 : 0,
+      srcVal,
+      syncFlag,
+      syncTs,
       existing.id
     )
     return { ok: true, student: db.prepare(`SELECT * FROM students WHERE id=?`).get(existing.id), created: false }
@@ -128,8 +141,9 @@ function upsertStudent({
     .prepare(
       `INSERT INTO students (
           guild_id, full_name, preferred_name, email, discord_user_id, discord_username,
-          duty_station, student_code, active, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+          duty_station, student_code, active, source, synced_from_discord, last_synced_at,
+          updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
     )
     .run(
       guildId,
@@ -140,7 +154,10 @@ function upsertStudent({
       discordUsername,
       dutyStation,
       studentCode,
-      active ? 1 : 0
+      active ? 1 : 0,
+      srcVal,
+      syncFlag,
+      syncTs
     )
 
   return { ok: true, student: db.prepare(`SELECT * FROM students WHERE id=?`).get(info.lastInsertRowid), created: true }
@@ -424,7 +441,7 @@ function exportRosterCsv({ guildId, cohortId = null } = {}) {
   return { ok: true, csv: `${lines.join('\n')}\n`, count: rows.length }
 }
 
-function findOrCreateStudentFromDiscordMember({ guildId, member }) {
+function findOrCreateStudentFromDiscordMember({ guildId, member, source = 'discord_checkin_auto' }) {
   if (!guildId || !member?.user?.id) return { ok: false, error: 'guildId and member.user.id are required.' }
   const existing = findStudentByDiscordUserId({ guildId, discordUserId: member.user.id })
   if (existing) return { ok: true, student: existing, created: false }
@@ -434,11 +451,147 @@ function findOrCreateStudentFromDiscordMember({ guildId, member }) {
     preferredName: member.displayName || null,
     discordUserId: member.user.id,
     discordUsername: member.user.username || null,
+    source,
+    syncedFromDiscord: 1,
+    lastSyncedAt: new Date().toISOString(),
   })
+}
+
+/**
+ * Sync students from a Discord guild based on the Student role.
+ * @param {Object} params
+ * @param {Object} params.guild - Discord.js Guild object (must be fetched with members)
+ * @param {string} params.guildId - Guild ID string
+ * @param {number|null} params.cohortId - Cohort to attach students to (null = active/default)
+ * @param {string} params.syncedBy - Who triggered the sync
+ * @param {'append'|'mirror'} params.mode - Sync mode (default 'append')
+ * @returns {Object} summary
+ */
+async function syncStudentsFromDiscordGuild({ guild, guildId, cohortId = null, syncedBy = 'dashboard', mode = 'append', studentRoleId = null, studentRoleName = null }) {
+  const summary = {
+    scannedMembers: 0,
+    matchedStudentRole: 0,
+    created: 0,
+    updated: 0,
+    linked: 0,
+    deactivated: 0,
+    skippedBots: 0,
+    skippedNoStudentRole: 0,
+    errors: [],
+    warnings: [],
+  }
+
+  if (!guild && !guildId) {
+    return { ok: false, error: 'guild or guildId is required.', summary }
+  }
+
+  const effectiveGuildId = guildId || guild?.id
+
+  // 1. Check Student role
+  const roleOptions = { studentRoleId, studentRoleName }
+  const roleStatus = studentRoleConfig.checkStudentRoleStatus(guild, roleOptions)
+  if (!roleStatus.configured) {
+    return { ok: false, error: roleStatus.reason || 'Student role not configured/found.', summary }
+  }
+
+  // 2. Fetch all members
+  try {
+    await guild.members.fetch()
+  } catch (e) {
+    summary.warnings.push(`Could not fetch all members: ${e.message}. Using cached members.`)
+  }
+
+  const allMembers = guild.members.cache
+  summary.scannedMembers = allMembers.size
+
+  // 3. Resolve cohort
+  let resolvedCohortId = cohortId ? Number(cohortId) : null
+  if (!resolvedCohortId) {
+    const activeCohort = getActiveCohort(effectiveGuildId)
+    if (activeCohort) {
+      resolvedCohortId = activeCohort.id
+    } else {
+      // Create a default cohort
+      const created = createCohort({ guildId: effectiveGuildId, name: 'Discord Students' })
+      if (created.ok) resolvedCohortId = created.cohort.id
+    }
+  }
+
+  const nowIso = new Date().toISOString()
+  const syncedDiscordUserIds = new Set()
+
+  // 4. Process members
+  for (const [, member] of allMembers) {
+    // Skip bots
+    if (member.user.bot) {
+      summary.skippedBots++
+      continue
+    }
+
+    // Check Student role
+    if (!studentRoleConfig.hasStudentRole(member, roleOptions)) {
+      summary.skippedNoStudentRole++
+      continue
+    }
+
+    summary.matchedStudentRole++
+    syncedDiscordUserIds.add(member.user.id)
+
+    try {
+      const result = upsertStudent({
+        guildId: effectiveGuildId,
+        fullName: member.displayName || member.user.username || member.user.id,
+        preferredName: member.displayName || null,
+        discordUserId: member.user.id,
+        discordUsername: member.user.username || null,
+        dutyStation: 'Remote',
+        active: 1,
+        source: 'discord_sync',
+        syncedFromDiscord: 1,
+        lastSyncedAt: nowIso,
+      })
+
+      if (!result.ok) {
+        summary.errors.push({ userId: member.user.id, error: result.error })
+        continue
+      }
+
+      if (result.created) {
+        summary.created++
+      } else {
+        summary.updated++
+      }
+
+      // Attach to cohort
+      if (resolvedCohortId && result.student?.id) {
+        attachStudentToCohort({ cohortId: resolvedCohortId, studentId: result.student.id, active: 1 })
+        summary.linked++
+      }
+    } catch (e) {
+      summary.errors.push({ userId: member.user.id, error: e.message })
+    }
+  }
+
+  // 5. Mirror mode: deactivate students whose discord_user_id is not in the current Student role set
+  if (mode === 'mirror') {
+    const allRosterStudents = db
+      .prepare(`SELECT id, discord_user_id FROM students WHERE guild_id=? AND active=1 AND synced_from_discord=1`)
+      .all(effectiveGuildId)
+
+    for (const row of allRosterStudents) {
+      if (row.discord_user_id && !syncedDiscordUserIds.has(row.discord_user_id)) {
+        db.prepare(`UPDATE students SET active=0, updated_at=datetime('now') WHERE id=?`).run(row.id)
+        summary.deactivated++
+      }
+    }
+  }
+
+  return { ok: true, summary }
 }
 
 module.exports = {
   createCohort,
+  findCohortByName,
   listCohorts,
   getActiveCohort,
   upsertStudent,
@@ -451,4 +604,5 @@ module.exports = {
   exportRosterCsv,
   findStudentByDiscordUserId,
   findOrCreateStudentFromDiscordMember,
+  syncStudentsFromDiscordGuild,
 }

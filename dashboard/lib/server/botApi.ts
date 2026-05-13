@@ -87,6 +87,23 @@ export async function botGet<T = unknown>(
   }
 }
 
+/** Raw GET for binary responses (e.g. PDF). Caller checks res.ok and reads body. */
+export async function botProxyGet(
+  pathWithQuery: string,
+  options?: { timeoutMs?: number }
+): Promise<Response> {
+  const url = `${BOT_API_URL.replace(/\/$/, "")}${pathWithQuery.startsWith("/") ? pathWithQuery : `/${pathWithQuery}`}`
+  return fetchWithTimeout(
+    url,
+    {
+      method: "GET",
+      headers: buildHeaders(),
+      cache: "no-store",
+    },
+    options?.timeoutMs ?? 60_000
+  )
+}
+
 export async function botPost<T = unknown>(
   path: string,
   body?: unknown,

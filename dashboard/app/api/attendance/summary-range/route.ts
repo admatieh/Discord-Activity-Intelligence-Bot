@@ -4,18 +4,20 @@ import { botGet } from "@/lib/server/botApi"
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const guildId = searchParams.get("guildId")
-  const date = searchParams.get("date")
+  const startDate = searchParams.get("startDate")
+  const endDate = searchParams.get("endDate")
   const cohortId = searchParams.get("cohortId")
-  if (!guildId) {
-    return NextResponse.json({ ok: false, error: "guildId is required", data: null }, { status: 400 })
+  if (!guildId || !startDate || !endDate) {
+    return NextResponse.json(
+      { ok: false, error: "guildId, startDate, and endDate are required", data: null },
+      { status: 400 }
+    )
   }
-  const sp = new URLSearchParams({ guildId })
-  if (date) sp.set("date", date)
+  const sp = new URLSearchParams({ guildId, startDate, endDate })
   if (cohortId) sp.set("cohortId", cohortId)
-  const result = await botGet(`/attendance/today?${sp.toString()}`)
+  const result = await botGet(`/attendance/summary-range?${sp.toString()}`, { timeoutMs: 45_000 })
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error ?? "Bot API is offline", data: null }, { status: 503 })
   }
   return NextResponse.json({ ok: true, data: result.data })
 }
-

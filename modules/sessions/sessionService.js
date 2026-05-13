@@ -99,7 +99,8 @@ function startSession(voiceChannelId, triggeredBy, options = {}) {
             channelId: voiceChannelId,
             triggeredBy,
             durationMinutes,
-            autoEndAt: autoEndAtISO
+            autoEndAt: autoEndAtISO,
+            options
         });
 
         if (!sessionId) {

@@ -26,7 +26,7 @@ import PageHeader from "@/components/layout/PageHeader"
 import StatusBadge from "@/components/ui/status-badge"
 import EmptyState from "@/components/states/EmptyState"
 import ErrorPanel from "@/components/states/ErrorPanel"
-import { apiFetch, formatDateTime, formatTimeAgo, safeArray } from "@/lib/helpers"
+import { apiFetch, formatDateTime, formatTimeAgo, safeArray, localDateTimeToUtcIso, toLocalDateInputValue } from "@/lib/helpers"
 import type { TextChannel, MessageDelivery, ScheduledItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -124,7 +124,7 @@ export default function MessagesPage() {
             guildId: selectedGuildId,
             textChannelId: selectedChannel,
             content: content.trim(),
-            scheduledFor: new Date(scheduledAt).toISOString(),
+            scheduledFor: localDateTimeToUtcIso(scheduledAt),
             requestedBy: "dashboard",
           }
 
@@ -272,7 +272,7 @@ export default function MessagesPage() {
                     type="datetime-local"
                     value={scheduledAt}
                     onChange={(e) => setScheduledAt(e.target.value)}
-                    min={new Date().toISOString().slice(0, 16)}
+                    min={toLocalDateInputValue(new Date())}
                   />
                 </div>
               )}

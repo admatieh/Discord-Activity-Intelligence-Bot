@@ -6,12 +6,13 @@ const logger = require('../utils/logger');
 // Create
 // ---------------------------------------------------------------------------
 
-function createSession({ channelId, triggeredBy, durationMinutes, autoEndAt }) {
+function createSession({ channelId, triggeredBy, durationMinutes, autoEndAt, options }) {
     try {
+        const optionsJson = options ? JSON.stringify(options) : null;
         const result = db.prepare(
-            `INSERT INTO sessions (channel_id, triggered_by, duration_minutes, auto_end_at)
-             VALUES (?, ?, ?, ?)`
-        ).run(channelId, triggeredBy, durationMinutes, autoEndAt);
+            `INSERT INTO sessions (channel_id, triggered_by, duration_minutes, auto_end_at, options_json)
+             VALUES (?, ?, ?, ?, ?)`
+        ).run(channelId, triggeredBy, durationMinutes, autoEndAt, optionsJson);
 
         return Number(result.lastInsertRowid);
     } catch (error) {

@@ -14,14 +14,23 @@ import {
   Database,
   Clock,
   RefreshCw,
+  Square,
+  AlertTriangle
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
 import PageHeader from "@/components/layout/PageHeader"
 import MetricCard from "@/components/cards/MetricCard"
 import StatusBadge from "@/components/ui/status-badge"
 import ErrorPanel from "@/components/states/ErrorPanel"
 import EmptyState from "@/components/states/EmptyState"
-import { apiFetch, formatDateTime, formatTimeAgo, formatDuration, safeArray } from "@/lib/helpers"
+import { apiFetch, formatDateTime, formatTimeAgo, formatDuration, safeArray, parseApiDate } from "@/lib/helpers"
 import type { SystemHealth, DatabaseStatus, Session, ScheduledItem, ActivityEvent, Report } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -54,6 +63,13 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [botUnreachable, setBotUnreachable] = useState(false)
+
+  // End Session states
+  const [endDialogOpen, setEndDialogOpen] = useState(false)
+  const [endingSession, setEndingSession] = useState(false)
+  const [endError, setEndError] = useState<string | null>(null)
+  const [endSuccess, setEndSuccess] = useState(false)
+  const [reportStatus, setReportStatus] = useState<"none" | "generating" | "generated" | "failed">("none")
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
@@ -117,6 +133,47 @@ export default function HomePage() {
     }
   }, [])
 
+  async function handleEndSession() {
+    if (!data.activeSession) return
+    setEndingSession(true)
+    setEndError(null)
+    setEndSuccess(false)
+    
+    try {
+      const res = await apiFetch<any>("/api/actions/session/end", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: data.activeSession.id,
+          voiceChannelId: data.activeSession.voiceChannelId,
+          requestedBy: "dashboard",
+          reason: "Ended from dashboard home",
+        }),
+      })
+
+      if (!res.ok) {
+        setEndError(res.error || "Failed to end session.")
+      } else {
+        setEndSuccess(true)
+        if (res.data?.reportGenerated) {
+          setReportStatus("generated")
+        } else if (res.data?.reportError) {
+          setReportStatus("failed")
+        }
+        
+        setTimeout(() => {
+          setEndDialogOpen(false)
+          setEndSuccess(false)
+          setReportStatus("none")
+          load(true)
+        }, 3000)
+      }
+    } catch (e) {
+      setEndError("Network error while ending session.")
+    } finally {
+      setEndingSession(false)
+    }
+  }
+
   useEffect(() => {
     load()
     const interval = setInterval(() => load(true), 30_000)
@@ -126,7 +183,11 @@ export default function HomePage() {
   const now = new Date()
   const upcomingScheduled = data.scheduled
     .filter((s) => s.status === "scheduled")
-    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
+    .sort((a, b) => {
+      const tA = parseApiDate(a.scheduledAt)?.getTime() ?? 0
+      const tB = parseApiDate(b.scheduledAt)?.getTime() ?? 0
+      return tA - tB
+    })
     .slice(0, 5)
 
   const recentReports = data.reports.slice(0, 4)
@@ -210,31 +271,113 @@ export default function HomePage() {
 
       {/* Active session card */}
       {data.activeSession && (
-        <div className="rounded-2xl border border-primary/20 bg-primary/5 p-5 shadow-sm transition-shadow hover:shadow-md">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
-                <Radio className="h-4 w-4 text-primary animate-pulse" />
+        <div className="rounded-2xl border border-primary/30 bg-card p-6 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-primary" />
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div className="flex items-start gap-4 flex-1">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 shrink-0">
+                <Radio className="h-6 w-6 text-primary animate-pulse" />
               </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">{data.activeSession.name || "Live Session"}</p>
-                <p className="text-xs text-muted-foreground">
-                  {data.activeSession.voiceChannelName
-                    ? `in #${data.activeSession.voiceChannelName}`
-                    : "Voice channel"}{" "}
-                  · started {formatTimeAgo(data.activeSession.startedAt)}
-                </p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-semibold text-foreground tracking-tight">
+                    {data.activeSession.name || "Live Session"}
+                  </h3>
+                  <StatusBadge status="active" dot />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-1.5">
+                    <Radio className="h-3.5 w-3.5" />
+                    <span className="truncate max-w-[200px]">
+                      {data.activeSession.voiceChannelName ? `#${data.activeSession.voiceChannelName}` : "Voice channel"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>Started {formatTimeAgo(data.activeSession.startedAt)}</span>
+                  </div>
+                  {data.activeSession.participantCount !== undefined && (
+                    <div className="flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5" />
+                      <span>{data.activeSession.participantCount} participants</span>
+                    </div>
+                  )}
+                  {data.activeSession.durationMinutes !== undefined && (
+                    <div className="flex items-center gap-1.5">
+                      <Activity className="h-3.5 w-3.5" />
+                      <span>{formatDuration(data.activeSession.durationMinutes)} elapsed</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <StatusBadge status="active" dot />
-              <Button size="sm" variant="outline" asChild>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0 w-full md:w-auto">
+              <Button size="sm" variant="outline" asChild className="w-full sm:w-auto">
                 <Link href="/record">View Session</Link>
+              </Button>
+              <Button 
+                size="sm" 
+                variant="destructive" 
+                className="w-full sm:w-auto gap-1.5"
+                onClick={() => {
+                  setEndError(null)
+                  setEndSuccess(false)
+                  setEndDialogOpen(true)
+                }}
+              >
+                <Square className="h-3.5 w-3.5 fill-current" />
+                End Session
               </Button>
             </div>
           </div>
         </div>
       )}
+
+      {/* End Session Dialog */}
+      <Dialog open={endDialogOpen} onOpenChange={(open) => !endingSession && setEndDialogOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>End this session?</DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="text-sm text-muted-foreground">
+              This will stop tracking and close the active session immediately. You will be able to generate a report afterwards.
+            </p>
+            {endError && (
+              <div className="mt-4 text-sm text-destructive bg-destructive/10 border border-destructive/20 p-3 rounded-md">
+                {endError}
+              </div>
+            )}
+            {endSuccess && (
+              <div className="mt-4 text-sm space-y-2">
+                <div className="text-success bg-success/10 border border-success/20 p-3 rounded-md">
+                  Session ended successfully.
+                </div>
+                {reportStatus === "generated" && (
+                  <div className="text-primary bg-primary/10 border border-primary/20 p-3 rounded-md flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Report generated successfully.
+                  </div>
+                )}
+                {reportStatus === "failed" && (
+                  <div className="text-warning bg-warning/10 border border-warning/20 p-3 rounded-md flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    Session ended, but report generation failed.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setEndDialogOpen(false)} disabled={endingSession || endSuccess}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleEndSession} disabled={endingSession || endSuccess}>
+              {endingSession ? "Ending..." : "End Session"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Quick actions */}
       <div>

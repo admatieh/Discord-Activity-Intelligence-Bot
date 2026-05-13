@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { botGet, botPost } from "@/lib/server/botApi"
+import { extractRosterStudentsFromResponse } from "@/lib/rosterStudentUtils"
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -16,7 +17,8 @@ export async function GET(request: Request) {
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error ?? "Bot API is offline", data: null }, { status: 503 })
   }
-  return NextResponse.json({ ok: true, data: result.data })
+  const students = extractRosterStudentsFromResponse(result.data ?? null)
+  return NextResponse.json({ ok: true, data: { students } })
 }
 
 export async function POST(request: Request) {

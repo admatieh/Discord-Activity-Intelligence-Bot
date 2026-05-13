@@ -1,5 +1,7 @@
 const logger = require('../../utils/logger')
 const attendanceService = require('../../services/attendanceCheckpointService')
+const rosterService = require('../../services/rosterService')
+const studentRoleConfig = require('../../config/studentRoleConfig')
 
 module.exports = {
   name: 'checkout',
@@ -16,6 +18,44 @@ module.exports = {
 
       const userId = message.author?.id
       if (!userId) return message.reply('❌ Could not determine your user ID.')
+
+      // --- Student role gating (only if configured) ---
+      const member = message.member
+      const roleStatus = studentRoleConfig.checkStudentRoleStatus(message.guild)
+
+      if (roleStatus.configured) {
+        // Student role exists in this guild — enforce it
+        if (member?.user?.bot) {
+          return message.reply('❌ Bots cannot use attendance checkout.')
+        }
+        if (!studentRoleConfig.hasStudentRole(member)) {
+          return message.reply('❌ You need the **Student** role to use attendance checkout.')
+        }
+
+        // Auto-roster: ensure student exists in roster
+        try {
+          const rosterResult = rosterService.findOrCreateStudentFromDiscordMember({
+            guildId: message.guild.id,
+            member,
+            source: 'discord_checkin_auto',
+          })
+          if (rosterResult.ok && rosterResult.created) {
+            // Auto-attach to active cohort
+            const activeCohort = rosterService.getActiveCohort(message.guild.id)
+            if (activeCohort && rosterResult.student?.id) {
+              rosterService.attachStudentToCohort({
+                cohortId: activeCohort.id,
+                studentId: rosterResult.student.id,
+                active: 1,
+              })
+            }
+          }
+        } catch (e) {
+          logger.error(`checkout auto-roster error: ${e.message}`)
+          // Non-fatal — continue with checkpoint recording
+        }
+      }
+      // If Student role is NOT configured, skip all gating — works as before
 
       const displayName =
         message.member?.displayName ||
@@ -56,4 +96,3 @@ module.exports = {
     }
   },
 }
-

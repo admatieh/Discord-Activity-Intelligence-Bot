@@ -18,11 +18,19 @@ const participationSummaryModel = require('../models/participationSummaryModel')
 /**
  * Generate and persist a report for a session.
  * @param {number} sessionId
- * @param {{ requestedBy? }} options
- * @returns {{ ok, report, error }}
+ * @param {{ requestedBy?, skipIfExists? }} options
+ * @returns {{ ok, report, error, skipped }}
  */
 async function generateSessionReport(sessionId, options = {}) {
     try {
+        if (options.skipIfExists) {
+            const existing = db.prepare('SELECT id FROM session_reports WHERE session_id = ?').get(sessionId);
+            if (existing) {
+                logger.log(`[ReportService] Report already exists for session #${sessionId}, skipping.`);
+                return { ok: true, skipped: true };
+            }
+        }
+
         const session = sessionModel.getSessionById(sessionId);
         if (!session) {
             return { ok: false, error: `Session #${sessionId} not found` };

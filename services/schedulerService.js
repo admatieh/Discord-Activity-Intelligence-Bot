@@ -129,7 +129,10 @@ async function executeScheduledSession(item) {
         const result = sessionService.startSession(
             item.voice_channel_id || payload.voiceChannelId,
             item.created_by || 'scheduler',
-            { durationMinutes: item.duration_minutes || payload.durationMinutes || 60 }
+            { 
+                durationMinutes: item.duration_minutes || payload.durationMinutes || 60,
+                ...(payload.options || {})
+            }
         );
 
         if (!result.success) {

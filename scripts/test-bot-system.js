@@ -398,6 +398,7 @@ bad@example.com,abc123`;
             });
             assert(exp.ok, 'exportAttendanceCsv failed');
             assert(exp.csv.includes('Course Name,Cohort,Student Name'), 'CSV headers missing expected prefix');
+            assert(exp.csv.includes('Daily Status'), 'CSV should include Daily Status column');
         });
 
         await test('Attendance export includes missing roster rows', async () => {
@@ -436,6 +437,189 @@ bad@example.com,abc123`;
                 `SELECT * FROM attendance_checkpoints WHERE guild_id=? AND user_id=? AND attendance_date=? AND checkpoint_key=?`
             ).get(guildId, 'student_1', '2026-01-02', 'midday_checkin');
             assert(row && row.status === 'excused', 'manual correction did not upsert checkpoint');
+        });
+
+        await test('Roster listStudents active=true excludes inactive', async () => {
+            const guildId = 'guild_active_roster_filter_v1';
+            rosterService.upsertStudent({ guildId, fullName: 'Active R', discordUserId: 'active_r_1', active: 1 });
+            rosterService.upsertStudent({ guildId, fullName: 'Inactive R', discordUserId: 'inactive_r_1', active: 0 });
+            const act = rosterService.listStudents({ guildId, active: true });
+            const all = rosterService.listStudents({ guildId });
+            assert(act.length === 1 && act[0].discord_user_id === 'active_r_1', 'active=true filters');
+            assert(all.length >= 2, 'without active filter returns all');
+        });
+
+        await test('Manual correction and daily override by studentId without Discord user id', async () => {
+            const attendanceDaily = require('../services/attendanceDailyStatusService');
+            const guildId = 'guild_no_discord_student_v1';
+            const cohortRes = rosterService.createCohort({ guildId, name: 'ND', active: 1 });
+            assert(cohortRes.ok, 'cohort');
+            const stNo = rosterService.upsertStudent({
+                guildId,
+                fullName: 'No Discord Full',
+                preferredName: 'NoDex',
+                discordUserId: null,
+                discordUsername: null,
+                dutyStation: 'Remote',
+                active: 1,
+            });
+            const stWith = rosterService.upsertStudent({
+                guildId,
+                fullName: 'With Discord Full',
+                discordUserId: 'nd_with_discord',
+                active: 1,
+            });
+            assert(stNo.ok && stWith.ok, 'students');
+            rosterService.attachStudentToCohort({ cohortId: cohortRes.cohort.id, studentId: stNo.student.id, active: 1 });
+            rosterService.attachStudentToCohort({ cohortId: cohortRes.cohort.id, studentId: stWith.student.id, active: 1 });
+            attendanceSettingsService.getCheckpointDefinitions(guildId);
+            const testDate = '2026-04-10';
+            const uidNo = `student:${stNo.student.id}`;
+            const m1 = attendanceService.upsertManualAttendance({
+                guildId,
+                userId: null,
+                studentId: stNo.student.id,
+                date: testDate,
+                checkpointKey: 'morning_checkin',
+                status: 'present',
+                changedBy: 't',
+                displayName: stNo.student.full_name,
+            });
+            assert(m1.ok, m1.error || 'manual no discord');
+            const m2 = attendanceService.upsertManualAttendance({
+                guildId,
+                userId: null,
+                studentId: stWith.student.id,
+                date: testDate,
+                checkpointKey: 'morning_checkin',
+                status: 'present',
+                changedBy: 't',
+                displayName: stWith.student.full_name,
+            });
+            assert(m2.ok, m2.error || 'manual with discord via studentId');
+            const rowNo = db.prepare(
+                `SELECT * FROM attendance_checkpoints WHERE guild_id=? AND user_id=? AND attendance_date=?`
+            ).get(guildId, uidNo, testDate);
+            assert(rowNo, 'checkpoint row no discord');
+            attendanceDaily.upsertDailyOverride({
+                guildId,
+                userId: null,
+                studentId: stNo.student.id,
+                attendanceDate: testDate,
+                status: 'manual',
+                changedBy: 't',
+            });
+            const stNoDaily = attendanceDaily.getStudentDailyAttendanceStatus({ guildId, studentId: uidNo, date: testDate });
+            assert(stNoDaily.exportable === true, 'no discord override exportable');
+            attendanceDaily.upsertDailyOverride({
+                guildId,
+                userId: null,
+                studentId: stWith.student.id,
+                attendanceDate: testDate,
+                status: 'manual',
+                changedBy: 't',
+            });
+            const stWithDaily = attendanceDaily.getStudentDailyAttendanceStatus({
+                guildId,
+                studentId: 'nd_with_discord',
+                date: testDate,
+            });
+            assert(stWithDaily.exportable === true, 'with discord override');
+        });
+
+        await test('Daily attendance status partial vs complete_late and PDF buffer', async () => {
+            const attendanceDaily = require('../services/attendanceDailyStatusService');
+            const guildId = 'guild_daily_status_v1';
+            const cohortRes = rosterService.createCohort({ guildId, name: 'DStatus', active: 1 });
+            const st = rosterService.upsertStudent({ guildId, fullName: 'DS Student', discordUserId: 'ds_student_1' });
+            assert(cohortRes.ok && st.ok, 'seed cohort/student');
+            rosterService.attachStudentToCohort({ cohortId: cohortRes.cohort.id, studentId: st.student.id, active: 1 });
+            attendanceSettingsService.getCheckpointDefinitions(guildId);
+
+            attendanceService.upsertManualAttendance({
+                guildId,
+                userId: 'ds_student_1',
+                date: '2026-03-01',
+                checkpointKey: 'morning_checkin',
+                status: 'present',
+                changedBy: 't',
+            });
+            const partial = attendanceDaily.getStudentDailyAttendanceStatus({
+                guildId,
+                studentId: 'ds_student_1',
+                date: '2026-03-01',
+            });
+            assert(partial.status === 'partial', 'expected partial');
+            assert(partial.exportable === false, 'partial not exportable');
+
+            attendanceService.upsertManualAttendance({
+                guildId,
+                userId: 'ds_student_1',
+                date: '2026-03-01',
+                checkpointKey: 'midday_checkin',
+                status: 'late',
+                changedBy: 't',
+            });
+            attendanceService.upsertManualAttendance({
+                guildId,
+                userId: 'ds_student_1',
+                date: '2026-03-01',
+                checkpointKey: 'checkout',
+                status: 'late',
+                changedBy: 't',
+            });
+            const full = attendanceDaily.getStudentDailyAttendanceStatus({
+                guildId,
+                studentId: 'ds_student_1',
+                date: '2026-03-01',
+            });
+            assert(full.status === 'complete_late', 'expected complete_late');
+            assert(full.exportable === true, 'full required checkpoints exportable');
+
+            const pdf = await attendanceDaily.exportOfficialAttendancePdf({
+                guildId,
+                cohortId: cohortRes.cohort.id,
+                month: 3,
+                year: 2026,
+                courseName: 'Test',
+            });
+            assert(pdf.ok && pdf.buffer && pdf.buffer.length > 200, 'non-empty pdf');
+        });
+
+        await test('Daily override makes partial day exportable', async () => {
+            const attendanceDaily = require('../services/attendanceDailyStatusService');
+            const guildId = 'guild_daily_override_v1';
+            const cohortRes = rosterService.createCohort({ guildId, name: 'Ov', active: 1 });
+            const st = rosterService.upsertStudent({ guildId, fullName: 'Ov Student', discordUserId: 'ov_student_1' });
+            assert(cohortRes.ok && st.ok, 'seed');
+            rosterService.attachStudentToCohort({ cohortId: cohortRes.cohort.id, studentId: st.student.id, active: 1 });
+            attendanceSettingsService.getCheckpointDefinitions(guildId);
+            attendanceService.upsertManualAttendance({
+                guildId,
+                userId: 'ov_student_1',
+                date: '2026-03-02',
+                checkpointKey: 'morning_checkin',
+                status: 'present',
+                changedBy: 't',
+            });
+            assert(
+                attendanceDaily.getStudentDailyAttendanceStatus({ guildId, studentId: 'ov_student_1', date: '2026-03-02' })
+                    .exportable === false,
+                'before override'
+            );
+            attendanceDaily.upsertDailyOverride({
+                guildId,
+                userId: 'ov_student_1',
+                attendanceDate: '2026-03-02',
+                status: 'manual',
+                notes: 'ok',
+                changedBy: 't',
+            });
+            assert(
+                attendanceDaily.getStudentDailyAttendanceStatus({ guildId, studentId: 'ov_student_1', date: '2026-03-02' })
+                    .exportable === true,
+                'after override'
+            );
         });
 
         await test('Insert and retrieve enhanced log', async () => {
